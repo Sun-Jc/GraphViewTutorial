@@ -1,0 +1,77 @@
+﻿
+VertexDocument (Small):
+{
+	"id": ...,
+	"_partition": ...,    // = id
+	"_edge": [
+		<EdgeObject>, ...
+	],
+	"_reverse_edge": [
+		<RevEdgeObject>, ...
+	],
+	"_nextEdgeOffset": ...
+
+	// vertex properties
+	"label": ...,  // optional
+	...
+}
+
+
+VertexDocument (Large):
+{
+	"id": ...,
+	"_partition": ...,    // = id
+	"_edge": {
+		"_edges": [
+			{
+				"id": <edge-doucment-id>
+			}, ...
+		]
+	},
+	"_reverse_edge": {
+		"_edges": [
+			{
+				"id": <edge-doucment-id>
+			}, ...
+		]
+	},
+	"_nextEdgeOffset": ...
+
+	// vertex properties
+	"label": ...,  // optional
+	...
+}
+
+EdgeDocument:
+{
+	"id": ...,
+	"_vertex_id": ...,   // id of current VertexDocument
+	"_partition": ...,   // = _partition of the vertex = _vertex_id (tricky!)
+	"_is_reverse": true/false,   // indicate whether this vertex is source(false) or sink (true)
+	"_edge": [
+		<EdgeObject/RevEdgeObject>, ...
+	]
+}
+
+
+EdgeObject:
+{
+	"_offset": ...,	        // offset of current edge (relative to srcV)
+	"_sinkV": ...,	        // id of sink vertex
+	"_sinkVLabel": ...,     // label of sink vertex, must exist, can be JValue-null
+
+	// edge properties
+	"label": ...,  // optional
+	...
+}
+
+RevEdgeObject:
+{
+	"_offset": ...,	        // offset of current edge (relative to srcV)
+	"_srcV": ...,	        // id of sink vertex
+	"_srcVLabel": ...,      // label of sink vertex, must exist, can be JValue-null
+
+	// edge properties
+	"label": ...,  // optional
+	...
+}

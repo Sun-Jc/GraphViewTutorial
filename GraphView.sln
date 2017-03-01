@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GraphView", "GraphView\GraphView.csproj", "{33CADC4A-376F-489B-8357-BE60D8F6186A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GraphViewUnitTest", "GraphViewUnitTest\GraphViewUnitTest.csproj", "{4060ECE6-40A9-4471-8195-8669C5EFA674}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{5BA44159-F179-4608-9AEC-5194BB9051B5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuickStart", "QuickStart\QuickStart.csproj", "{77110F2B-DFE6-4D58-BB4E-8AFEBF48DFF9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{33CADC4A-376F-489B-8357-BE60D8F6186A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33CADC4A-376F-489B-8357-BE60D8F6186A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33CADC4A-376F-489B-8357-BE60D8F6186A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33CADC4A-376F-489B-8357-BE60D8F6186A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4060ECE6-40A9-4471-8195-8669C5EFA674}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4060ECE6-40A9-4471-8195-8669C5EFA674}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4060ECE6-40A9-4471-8195-8669C5EFA674}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4060ECE6-40A9-4471-8195-8669C5EFA674}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77110F2B-DFE6-4D58-BB4E-8AFEBF48DFF9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77110F2B-DFE6-4D58-BB4E-8AFEBF48DFF9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77110F2B-DFE6-4D58-BB4E-8AFEBF48DFF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77110F2B-DFE6-4D58-BB4E-8AFEBF48DFF9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

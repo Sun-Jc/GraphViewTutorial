@@ -212,7 +212,7 @@ _Pvt_Extensions/
 ModelManifest.xml
 
 #App Config
-[Aa]pp.config
+#[Aa]pp.config
 TestConfiguration.cs
 *.pk
 *.jky

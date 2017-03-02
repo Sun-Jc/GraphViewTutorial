@@ -1104,6 +1104,10 @@ namespace GraphView
                         case "FOLD":
                         case "TREE":
                         case "CAP":
+                        case "SUM":
+                        case "MAX":
+                        case "MIN":
+                        case "MEAN":
                             aggregateCount++;
                             break;
                         default:
@@ -1206,18 +1210,17 @@ namespace GraphView
                             projectAggregationOp.AddAggregateSpec(new CountFunction(), new List<ScalarFunction>());
                             break;
                         case "FOLD":
-                            var foldedFunction = fcall.Parameters[0] as WFunctionCall;
+                            WFunctionCall foldedFunction = fcall.Parameters[0] as WFunctionCall;
                             if (foldedFunction == null)
                                 throw new SyntaxErrorException("The parameter of a Fold function must be a Compose1 function.");
                             projectAggregationOp.AddAggregateSpec(new FoldFunction(), 
                                 new List<ScalarFunction> { foldedFunction.CompileToFunction(context, connection), });
                             break;
                         case "TREE":
-                            var pathField = fcall.Parameters[0] as WColumnReferenceExpression;
-                            var pathFieldIndex = context.LocateColumnReference(pathField);
+                            WColumnReferenceExpression pathField = fcall.Parameters[0] as WColumnReferenceExpression;
                             projectAggregationOp.AddAggregateSpec(
                                 new TreeFunction(), 
-                                new List<ScalarFunction>() { new FieldValue(pathFieldIndex) });
+                                new List<ScalarFunction>() { pathField.CompileToFunction(context, connection) });
                             break;
                         case "CAP":
                             CapAggregate capAggregate = new CapAggregate();
@@ -1226,12 +1229,36 @@ namespace GraphView
                                 WColumnNameList columnNameList = fcall.Parameters[i] as WColumnNameList;
                                 WValueExpression capName = fcall.Parameters[i+1] as WValueExpression;
 
-                                List<IAggregateFunction> sideEffectStateList;
-                                if (!context.SideEffectStates.TryGetValue(capName.Value, out sideEffectStateList))
+                                IAggregateFunction sideEffectState;
+                                if (!context.SideEffectStates.TryGetValue(capName.Value, out sideEffectState))
                                     throw new GraphViewException("SideEffect state " + capName + " doesn't exist in the context");
-                                capAggregate.AddCapatureSideEffectState(capName.Value, sideEffectStateList);
+                                capAggregate.AddCapatureSideEffectState(capName.Value, sideEffectState);
                             }
                             projectAggregationOp.AddAggregateSpec(capAggregate, new List<ScalarFunction>());
+                            break;
+                        case "SUM":
+                            WColumnReferenceExpression targetField = fcall.Parameters[0] as WColumnReferenceExpression;
+                            projectAggregationOp.AddAggregateSpec(
+                                new SumFunction(), 
+                                new List<ScalarFunction> { targetField.CompileToFunction(context, connection) });
+                            break;
+                        case "MAX":
+                            targetField = fcall.Parameters[0] as WColumnReferenceExpression;
+                            projectAggregationOp.AddAggregateSpec(
+                                new MaxFunction(),
+                                new List<ScalarFunction> { targetField.CompileToFunction(context, connection) });
+                            break;
+                        case "MIN":
+                            targetField = fcall.Parameters[0] as WColumnReferenceExpression;
+                            projectAggregationOp.AddAggregateSpec(
+                                new MinFunction(), 
+                                new List<ScalarFunction> { targetField.CompileToFunction(context, connection) });
+                            break;
+                        case "MEAN":
+                            targetField = fcall.Parameters[0] as WColumnReferenceExpression;
+                            projectAggregationOp.AddAggregateSpec(
+                                new MeanFunction(),
+                                new List<ScalarFunction> { targetField.CompileToFunction(context, connection) });
                             break;
                         default:
                             projectAggregationOp.AddAggregateSpec(null, null);
@@ -1409,7 +1436,7 @@ namespace GraphView
         {
             ContainerOperator containerOp = new ContainerOperator(context.CurrentExecutionOperator);
 
-            UnionOperator unionOp = new UnionOperator(context.CurrentExecutionOperator);
+            UnionOperator unionOp = new UnionOperator(context.CurrentExecutionOperator, containerOp);
 
             bool isUnionWithoutAnyBranch = Parameters[0] is WValueExpression;
 
@@ -1576,11 +1603,12 @@ namespace GraphView
             }
 
             QueryCompilationContext subcontext = new QueryCompilationContext(context);
+            ContainerOperator containerOp = null;
             bool isCarryOnMode = false;
             if (HasAggregateFunctionInTheOptionalSelectQuery(optionalSelect))
             {
                 isCarryOnMode = true;
-                ContainerOperator containerOp = new ContainerOperator(context.CurrentExecutionOperator);
+                containerOp = new ContainerOperator(context.CurrentExecutionOperator);
                 subcontext.CarryOn = true;
                 subcontext.OuterContextOp.SourceEnumerator = containerOp.GetEnumerator();
             }
@@ -1589,7 +1617,7 @@ namespace GraphView
 
             //OptionalOperator optionalOp = new OptionalOperator(context.CurrentExecutionOperator, inputIndexes, optionalTraversalOp, subcontext.OuterContextOp);
             OptionalOperator optionalOp = new OptionalOperator(context.CurrentExecutionOperator, inputIndexes,
-                optionalTraversalOp, subcontext.OuterContextOp, isCarryOnMode);
+                optionalTraversalOp, subcontext.OuterContextOp, containerOp, isCarryOnMode);
             context.CurrentExecutionOperator = optionalOp;
 
             // Updates the raw record layout. The columns of this table-valued function 
@@ -1987,12 +2015,10 @@ namespace GraphView
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            var targetField = Parameters[0] as WColumnReferenceExpression;
-            if (targetField == null)
-                throw new SyntaxErrorException("The parameter of Dedup function can only be a WColumnReference");
+            List<ScalarFunction> targetValueFunctionList =
+                Parameters.Select(expression => expression.CompileToFunction(context, dbConnection)).ToList();
 
-            var targetFieldIndex = context.LocateColumnReference(targetField);
-            var dedupOp = new DeduplicateOperator(context.CurrentExecutionOperator, targetFieldIndex);
+            DeduplicateOperator dedupOp = new DeduplicateOperator(context.CurrentExecutionOperator, targetValueFunctionList);
             context.CurrentExecutionOperator = dedupOp;
 
             return dedupOp;
@@ -2232,26 +2258,66 @@ namespace GraphView
         }
     }
 
+    partial class WAggregateTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WScalarSubquery getAggregateObjectSubqueryParameter = Parameters[0] as WScalarSubquery;
+            if (getAggregateObjectSubqueryParameter == null)
+                throw new SyntaxErrorException("The first parameter of an Aggregate function must be a WScalarSubquery.");
+            ScalarFunction getAggregateObjectFunction = getAggregateObjectSubqueryParameter.CompileToFunction(context, dbConnection);
+
+            string storedName = (Parameters[1] as WValueExpression).Value;
+
+            IAggregateFunction sideEffectState;
+            if (!context.SideEffectStates.TryGetValue(storedName, out sideEffectState))
+            {
+                sideEffectState = new CollectionFunction();
+                context.SideEffectStates.Add(storedName, sideEffectState);
+            }
+            else if (!(sideEffectState is CollectionFunction))
+            {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+            }
+
+            AggregateOperator aggregateOp = new AggregateOperator(context.CurrentExecutionOperator, getAggregateObjectFunction,
+                (CollectionFunction)sideEffectState);
+            context.CurrentExecutionOperator = aggregateOp;
+            // TODO: Change to correct ColumnGraphType
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
+            return aggregateOp;
+        }
+    }
+
     partial class WStoreTableReference
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            WFunctionCall targetFieldParameter = Parameters[0] as WFunctionCall;
-            if (targetFieldParameter == null)
-                throw new SyntaxErrorException("The first parameter of a Store function must be a Compose1 function.");
-            ScalarFunction getTargetFieldFunction = targetFieldParameter.CompileToFunction(context, dbConnection);
+            WScalarSubquery getStoreObjectSubqueryParameter = Parameters[0] as WScalarSubquery;
+            if (getStoreObjectSubqueryParameter == null)
+                throw new SyntaxErrorException("The first parameter of a Store function must be a WScalarSubquery.");
+            ScalarFunction getStoreObjectFunction = getStoreObjectSubqueryParameter.CompileToFunction(context, dbConnection);
 
             string storedName = (Parameters[1] as WValueExpression).Value;
-            StoreOperator storeOp = new StoreOperator(context.CurrentExecutionOperator, getTargetFieldFunction);
-            context.CurrentExecutionOperator = storeOp;
-
-            List<IAggregateFunction> sideEffectList;
-            if (!context.SideEffectStates.TryGetValue(storedName, out sideEffectList))
+            
+            IAggregateFunction sideEffectState;
+            if (!context.SideEffectStates.TryGetValue(storedName, out sideEffectState))
             {
-                sideEffectList = new List<IAggregateFunction>();
-                context.SideEffectStates.Add(storedName, sideEffectList);
+                sideEffectState = new CollectionFunction();
+                context.SideEffectStates.Add(storedName, sideEffectState);
             }
-            sideEffectList.Add(storeOp.StoreState);
+            else if (!(sideEffectState is CollectionFunction))
+            {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+            }
+
+            StoreOperator storeOp = new StoreOperator(context.CurrentExecutionOperator, getStoreObjectFunction,
+                (CollectionFunction) sideEffectState);
+            context.CurrentExecutionOperator = storeOp;
+            // TODO: Change to correct ColumnGraphType
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
 
             return storeOp;
         }
@@ -2415,21 +2481,26 @@ namespace GraphView
             }
             else
             {
+                IAggregateFunction sideEffectState;
+                if (!context.SideEffectStates.TryGetValue(groupParameter.Value, out sideEffectState))
+                {
+                    sideEffectState = new GroupFunction(tempSourceOp, aggregatedSourceOp, aggregateOp,
+                        elementPropertyProjectionIndex);
+                    context.SideEffectStates.Add(groupParameter.Value, sideEffectState);
+                }
+                else if (sideEffectState is GroupFunction) {
+                    throw new QueryCompilationException("Multi group with same sideEffect key is an undefined behavior in Gremlin and hence not supported.");
+                }
+                else {
+                    throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+                }
+
                 GroupSideEffectOperator groupSideEffectOp = new GroupSideEffectOperator(
-                    context.CurrentExecutionOperator, 
-                    groupKeyFunction, groupKeyFieldIndex,
-                    tempSourceOp, aggregatedSourceOp, aggregateOp,
-                    elementPropertyProjectionIndex);
+                    context.CurrentExecutionOperator,
+                    (GroupFunction)sideEffectState,
+                    groupKeyFunction, groupKeyFieldIndex);
 
                 context.CurrentExecutionOperator = groupSideEffectOp;
-
-                List<IAggregateFunction> sideEffectList;
-                if (!context.SideEffectStates.TryGetValue(groupParameter.Value, out sideEffectList))
-                {
-                    sideEffectList = new List<IAggregateFunction>();
-                    context.SideEffectStates.Add(groupParameter.Value, sideEffectList);
-                }
-                sideEffectList.Add(groupSideEffectOp.GroupState);
 
                 return groupSideEffectOp;
             }
@@ -2445,7 +2516,7 @@ namespace GraphView
                 throw new SyntaxErrorException("The QueryExpr of a WQueryDerviedTable must be one select query block.");
 
             QueryCompilationContext derivedTableContext = new QueryCompilationContext(context);
-
+            ContainerOperator containerOp = null;
             // If QueryDerivedTable is the first table in the whole script
             if (context.CurrentExecutionOperator == null)
                 derivedTableContext.OuterContextOp = null;
@@ -2456,7 +2527,7 @@ namespace GraphView
                 // For Union and Optional's semantics, e.g. g.V().union(__.count())
                 if (context.CarryOn)
                 {
-                    ContainerOperator containerOp = new ContainerOperator(context.CurrentExecutionOperator);
+                    containerOp = new ContainerOperator(context.CurrentExecutionOperator);
                     derivedTableContext.OuterContextOp.SourceEnumerator = containerOp.GetEnumerator();
                 }
                 // e.g. g.V().coalesce(__.count())
@@ -2468,7 +2539,7 @@ namespace GraphView
 
             GraphViewExecutionOperator subQueryOp = derivedSelectQueryBlock.Compile(derivedTableContext, dbConnection);
 
-            QueryDerivedTableOperator queryDerivedTableOp = new QueryDerivedTableOperator(subQueryOp);
+            QueryDerivedTableOperator queryDerivedTableOp = new QueryDerivedTableOperator(subQueryOp, containerOp);
 
             foreach (var selectElement in derivedSelectQueryBlock.SelectElements)
             {
@@ -2498,6 +2569,66 @@ namespace GraphView
             context.CurrentExecutionOperator = queryDerivedTableOp;
 
             return queryDerivedTableOp;
+        }
+    }
+
+    partial class WSumLocalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression targetField = Parameters[0] as WColumnReferenceExpression;
+
+            SumLocalOperator sumLocalOp = new SumLocalOperator(context.CurrentExecutionOperator,
+                context.LocateColumnReference(targetField));
+            context.CurrentExecutionOperator = sumLocalOp;
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
+            return sumLocalOp;
+        }
+    }
+
+    partial class WMaxLocalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression targetField = Parameters[0] as WColumnReferenceExpression;
+
+            MaxLocalOperator maxLocalOp = new MaxLocalOperator(context.CurrentExecutionOperator,
+                context.LocateColumnReference(targetField));
+            context.CurrentExecutionOperator = maxLocalOp;
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
+            return maxLocalOp;
+        }
+    }
+
+    partial class WMinLocalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression targetField = Parameters[0] as WColumnReferenceExpression;
+
+            MinLocalOperator minLocalOp = new MinLocalOperator(context.CurrentExecutionOperator,
+                context.LocateColumnReference(targetField));
+            context.CurrentExecutionOperator = minLocalOp;
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
+            return minLocalOp;
+        }
+    }
+
+    partial class WMeanLocalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression targetField = Parameters[0] as WColumnReferenceExpression;
+
+            MeanLocalOperator meanLocalOp = new MeanLocalOperator(context.CurrentExecutionOperator,
+                context.LocateColumnReference(targetField));
+            context.CurrentExecutionOperator = meanLocalOp;
+            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+
+            return meanLocalOp;
         }
     }
 }

@@ -6,21 +6,31 @@ using System.Threading.Tasks;
 
 namespace GraphView
 {
-    internal class GremlinStoreVariable : GremlinTableVariable
+    internal class GremlinStoreVariable : GremlinScalarTableVariable
     {
         public string SideEffectKey { get; set; }
-        public GremlinVariable StoredVariable { get; set; }
+        public GremlinToSqlContext ProjectContext { get; set; }
 
-        public GremlinStoreVariable(GremlinVariable storedVariable, string sideEffectKey)
+        public GremlinStoreVariable(GremlinToSqlContext projectContext, string sideEffectKey)
         {
-            StoredVariable = storedVariable;
+            ProjectContext = projectContext;
             SideEffectKey = sideEffectKey;
+            Labels.Add(sideEffectKey);
+        }
+
+        internal override GremlinVariableType GetUnfoldVariableType()
+        {
+            return ProjectContext.PivotVariable.GetVariableType();
         }
 
         public override WTableReference ToTableReference()
         {
             List<WScalarExpression> parameters = new List<WScalarExpression>();
-            parameters.Add(StoredVariable.ToCompose1());
+            //TODO: refactor
+            WSelectQueryBlock selectQueryBlock = ProjectContext.ToSelectQueryBlock();
+            selectQueryBlock.SelectElements.Clear();
+            selectQueryBlock.SelectElements.Add(SqlUtil.GetSelectScalarExpr(ProjectContext.PivotVariable.ToCompose1(), GremlinKeyword.TableDefaultColumnName));
+            parameters.Add(SqlUtil.GetScalarSubquery(selectQueryBlock));
             parameters.Add(SqlUtil.GetValueExpr(SideEffectKey));
             var secondTableRef = SqlUtil.GetFunctionTableReference(GremlinKeyword.func.Store, parameters, this, GetVariableName());
             return SqlUtil.GetCrossApplyTableReference(null, secondTableRef);

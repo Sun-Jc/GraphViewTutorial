@@ -21,42 +21,71 @@ namespace GraphView
     {
         public class GraphTraversalIterator : IEnumerator<string>
         {
-            private string CurrentRecord;
-            private GraphViewExecutionOperator CurrentOperator;
+            private string currentRecord;
+            private GraphViewExecutionOperator currentOperator;
             OutputFormat outputFormat;
+            bool firstCall;
 
             internal GraphTraversalIterator(GraphViewExecutionOperator pCurrentOperator,OutputFormat outputFormat)
             {
-                CurrentOperator = pCurrentOperator;
+                currentOperator = pCurrentOperator;
                 this.outputFormat = outputFormat;
+                this.firstCall = true;
             }
 
             public bool MoveNext()
             {
-                if (CurrentOperator == null) Reset();
+                if (currentOperator == null) return false;
 
-                RawRecord outputRec = null;
-                if ((outputRec = CurrentOperator.Next()) != null)
+                if (outputFormat == OutputFormat.GraphSON)
                 {
-                    string recordString = "";
-                    switch (outputFormat)
+                    RawRecord outputRec = null;
+                    StringBuilder graphsonBuilder = new StringBuilder();
+                    graphsonBuilder.Append("[");
+                    bool firstEntry = true;
+                    while ((outputRec = currentOperator.Next()) != null)
                     {
-
-                        case OutputFormat.GraphSON:
-                            recordString = "[";
-                            recordString += outputRec[0].ToGraphSON();
-                            recordString += "]";
-                            break;
-                        default:
-                            recordString = outputRec[0].ToString();
-                            break;
+                        if (firstEntry)
+                        {
+                            firstEntry = false;
+                        }
+                        else
+                        {
+                            graphsonBuilder.Append(", ");
+                        }
+                        graphsonBuilder.Append(outputRec[0].ToGraphSON());
                     }
-                    CurrentRecord = recordString;
-                    if (CurrentRecord != null)
+                    graphsonBuilder.Append("]");
+
+                    if (firstEntry && !firstCall)     // No results are pulled from the execution operator
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        firstCall = false;
+                        currentRecord = graphsonBuilder.ToString();
                         return true;
+                    }
+                }
+                else
+                {
+                    RawRecord outputRec = null;
+                    if ((outputRec = currentOperator.Next()) != null)
+                    {
+                        switch (outputFormat)
+                        {
+                            case OutputFormat.GraphSON:
+                                currentRecord = outputRec[0].ToGraphSON();
+                                break;
+                            default:
+                                currentRecord = outputRec[0].ToString();
+                                break;
+                        }
+                        return currentRecord != null;
+                    }
                     else return false;
                 }
-                else return false;
             }
 
             public void Reset()
@@ -67,7 +96,7 @@ namespace GraphView
             {
                 get
                 {
-                    return CurrentRecord;
+                    return currentRecord;
                 }
             }
 
@@ -75,7 +104,7 @@ namespace GraphView
             {
                 get
                 {
-                    return CurrentRecord;
+                    return currentRecord;
                 }
             }
 
@@ -241,7 +270,8 @@ namespace GraphView
 
         public GraphTraversal2 Aggregate(string sideEffectKey)
         {
-            throw new NotImplementedException();
+            AddGremlinOperator(new GremlinAggregateOp(sideEffectKey));
+            return this;
         }
 
         public GraphTraversal2 And(params GraphTraversal2[] andTraversals)
@@ -355,11 +385,23 @@ namespace GraphView
         }
         public GraphTraversal2 Count()
         {
-            AddGremlinOperator(new GremlinCountOp());
+            AddGremlinOperator(new GremlinCountOp(GremlinKeyword.Scope.global));
             return this;
         }
 
-        //public GraphTraversal2 count(Scope scope)
+        public GraphTraversal2 Count(GremlinKeyword.Scope scope)
+        {
+            if (scope == GremlinKeyword.Scope.global)
+            {
+                AddGremlinOperator(new GremlinCountOp(scope));
+            }
+            else
+            {
+                AddGremlinOperator(new GremlinCountOp(scope));
+            }
+            return this;
+        }
+
         //public GraphTraversal2 cyclicPath()
         //public GraphTraversal2 dedup(Scope scope, params string[] dedupLabels)
 
@@ -620,13 +662,17 @@ namespace GraphView
             return this;
         }
 
-        public GraphTraversal2 Limit(long limit)
+        public GraphTraversal2 Limit(int limit)
         {
-            AddGremlinOperator(new GremlinLimitOp(limit));
+            AddGremlinOperator(new GremlinRangeOp(0, limit, GremlinKeyword.Scope.global));
             return this;
         }
 
-        //public GraphTraversal2 limit(Scope scope, long limit)
+        public GraphTraversal2 limit(GremlinKeyword.Scope scope, int limit)
+        {
+            AddGremlinOperator(new GremlinRangeOp(0, limit, scope));
+            return this;
+        }
 
         public GraphTraversal2 Local(GraphTraversal2 localTraversal)
         {
@@ -654,7 +700,7 @@ namespace GraphView
 
         public GraphTraversal2 Max()
         {
-            AddGremlinOperator(new GremlinMaxOp());
+            AddGremlinOperator(new GremlinMaxOp(GremlinKeyword.Scope.global));
             return this;
         }
 
@@ -666,7 +712,7 @@ namespace GraphView
 
         public GraphTraversal2 Mean()
         {
-            AddGremlinOperator(new GremlinMeanOp());
+            AddGremlinOperator(new GremlinMeanOp(GremlinKeyword.Scope.global));
             return this;
         }
 
@@ -678,7 +724,7 @@ namespace GraphView
 
         public GraphTraversal2 Min()
         {
-            AddGremlinOperator(new GremlinMinOp());
+            AddGremlinOperator(new GremlinMinOp(GremlinKeyword.Scope.global));
             return this;
         }
 
@@ -791,7 +837,13 @@ namespace GraphView
 
         public GraphTraversal2 Range(int low, int high)
         {
-            AddGremlinOperator(new GremlinRangeOp(low, high));
+            AddGremlinOperator(new GremlinRangeOp(low, high, GremlinKeyword.Scope.global));
+            return this;
+        }
+
+        public GraphTraversal2 Range(GremlinKeyword.Scope scope, int low, int high)
+        {
+            AddGremlinOperator(new GremlinRangeOp(low, high, scope));
             return this;
         }
 
@@ -853,26 +905,39 @@ namespace GraphView
 
         public GraphTraversal2 Sum()
         {
-            AddGremlinOperator(new GremlinSumOp());
+            AddGremlinOperator(new GremlinSumOp(GremlinKeyword.Scope.global));
             return this;
         }
 
-        //public GraphTraversal2 sum(Scope scope)
+        public GraphTraversal2 Sum(GremlinKeyword.Scope scope)
+        {
+            AddGremlinOperator(new GremlinSumOp(scope));
+            return this;
+        }
 
         public GraphTraversal2 Tail()
         {
-            AddGremlinOperator(new GremlinTailOp());
+            AddGremlinOperator(new GremlinRangeOp(0, 1, GremlinKeyword.Scope.global, true));
             return this;
         }
 
-        public GraphTraversal2 Tail(long limit)
+        public GraphTraversal2 Tail(int limit)
         {
-            AddGremlinOperator(new GremlinTailOp(limit));
+            AddGremlinOperator(new GremlinRangeOp(0, limit, GremlinKeyword.Scope.global, true));
             return this;
         }
 
-        //public GraphTraversal2 tail(Scope scope)
-        //public GraphTraversal2 tail(Scope scope, long limit)
+        public GraphTraversal2 tail(GremlinKeyword.Scope scope)
+        {
+            AddGremlinOperator(new GremlinRangeOp(0, 1, scope, true));
+            return this;
+        }
+
+        public GraphTraversal2 tail(GremlinKeyword.Scope scope, int limit)
+        {
+            AddGremlinOperator(new GremlinRangeOp(0, limit, scope, true));
+            return this;
+        }
 
         public GraphTraversal2 TimeLimit(long timeLimit)
         {

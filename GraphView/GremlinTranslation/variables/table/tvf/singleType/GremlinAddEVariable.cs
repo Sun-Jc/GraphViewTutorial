@@ -11,18 +11,27 @@ namespace GraphView
         public GremlinVariable InputVariable { get; set; }
         public GremlinToSqlContext FromVertexContext { get; set; }
         public GremlinToSqlContext ToVertexContext { get; set; }
-        public Dictionary<string, object> EdgeProperties { get; set; }
+        public List<object> EdgeProperties { get; set; }
         public string EdgeLabel { get; set; }
 
         private int OtherVIndex;
 
         public GremlinAddETableVariable(GremlinVariable inputVariable, string edgeLabel)
         {
-            EdgeProperties = new Dictionary<string, object>();
+            EdgeProperties = new List<object>();
             EdgeLabel = edgeLabel;
             InputVariable = inputVariable;
             EdgeType = WEdgeType.OutEdge;
             OtherVIndex = 1;
+            ProjectedProperties.Add(GremlinKeyword.Label);
+        }
+
+        internal override void Populate(string property)
+        {
+            if (ProjectedProperties.Contains(property)) return;
+            EdgeProperties.Add(property);
+            EdgeProperties.Add(null);
+            base.Populate(property);
         }
 
         internal override void InV(GremlinToSqlContext currentContext)
@@ -122,10 +131,10 @@ namespace GraphView
                 parameters.Add(SqlUtil.GetValueExpr(GremlinKeyword.Label));
                 parameters.Add(SqlUtil.GetValueExpr(EdgeLabel));
             }
-            foreach (var property in EdgeProperties)
+            for (var i = 0; i < EdgeProperties.Count; i += 2)
             {
-                parameters.Add(SqlUtil.GetValueExpr(property.Key));
-                parameters.Add(SqlUtil.GetValueExpr(property.Value));
+                parameters.Add(SqlUtil.GetValueExpr(EdgeProperties[i]));
+                parameters.Add(SqlUtil.GetValueExpr(EdgeProperties[i+1]));
             }
             var secondTableRef = SqlUtil.GetFunctionTableReference(GremlinKeyword.func.AddE, parameters, this, GetVariableName());
 
@@ -164,12 +173,10 @@ namespace GraphView
             FromVertexContext.HomeVariable = this;
         }
 
-        internal override void Property(GremlinToSqlContext currentContext, Dictionary<string, object> properties)
+        internal override void Property(GremlinToSqlContext currentContext, List<object> properties)
         {
-            foreach (var pair in properties)
-            {
-                EdgeProperties[pair.Key] = pair.Value;
-            }
+             ProjectedProperties.Add(properties.First() as string);
+             EdgeProperties.AddRange(properties);
         }
 
         internal override void To(GremlinToSqlContext currentContext, string label)

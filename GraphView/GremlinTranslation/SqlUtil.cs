@@ -216,10 +216,11 @@ namespace GraphView
             WBooleanExpression concatExpr = null;
             foreach (var booleanExpr in booleanExprList)
             {
+                if (booleanExpr == null) continue;
                 concatExpr = concatExpr == null ? booleanExpr
                                                 : GetBooleanBinaryExpr(booleanExpr, concatExpr, type);
             }
-            return GetBooleanParenthesisExpr(concatExpr);
+            return concatExpr == null ? null: GetBooleanParenthesisExpr(concatExpr);
         }
 
         internal static WSchemaObjectName GetSchemaObjectName(string value)
@@ -235,7 +236,9 @@ namespace GraphView
                 TableObjectString = "node",
                 TableObjectName = GetSchemaObjectName("node"),
                 Low = gremlinVar.Low,
-                High = gremlinVar.High
+                High = gremlinVar.High,
+                IsLocal =  gremlinVar.IsLocal,
+                IsReverse =  gremlinVar.IsReverse
             };
         }
 
@@ -430,6 +433,27 @@ namespace GraphView
                 case GremlinKeyword.func.Store:
                     funcTableRef = new WStoreTableReference();
                     break;
+                case GremlinKeyword.func.Aggregate:
+                    funcTableRef = new WAggregateTableReference();
+                    break;
+                case GremlinKeyword.func.Coin:
+                    funcTableRef = new WCoinTableReference();
+                    break;
+                case GremlinKeyword.func.CountLocal:
+                    funcTableRef = new WCountLocalTableReference();
+                    break;
+                case GremlinKeyword.func.MinLocal:
+                    funcTableRef = new WMinLocalTableReference();
+                    break;
+                case GremlinKeyword.func.MaxLocal:
+                    funcTableRef = new WMaxLocalTableReference();
+                    break;
+                case GremlinKeyword.func.MeanLocal:
+                    funcTableRef = new WMeanLocalTableReference();
+                    break;
+                case GremlinKeyword.func.SumLocal:
+                    funcTableRef = new WSumLocalTableReference();
+                    break;
                 default:
                     throw new NotImplementedException();
             }
@@ -438,6 +462,8 @@ namespace GraphView
             funcTableRef.Alias = GetIdentifier(alias);
             funcTableRef.Low = gremlinvariable.Low;
             funcTableRef.High = gremlinvariable.High;
+            funcTableRef.IsLocal = gremlinvariable.IsLocal;
+            funcTableRef.IsReverse = gremlinvariable.IsReverse;
             return funcTableRef;
         }
 

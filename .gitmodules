@@ -1,0 +1,4 @@
+[submodule "_GraphSource"]
+	path = _GraphSource
+	url = https://github.com/Microsoft/GraphView.git
+	branch = DocDB-merge

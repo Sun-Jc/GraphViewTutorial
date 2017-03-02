@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -122,7 +124,7 @@ namespace GraphView
     internal class TraversalOperator2 : GraphViewExecutionOperator
     {
         private int outputBufferSize;
-        private int batchSize = 100;
+        private int batchSize = 1100;
         private Queue<RawRecord> outputBuffer;
         private GraphViewConnection connection;
         private GraphViewExecutionOperator inputOp;
@@ -1495,6 +1497,7 @@ namespace GraphView
         // as the records drawn from the input operator, i.e., inputIndexes.Count 
         private GraphViewExecutionOperator optionalTraversal;
         private ConstantSourceOperator contextOp;
+        private ContainerOperator rootContainerOp;
 
         private RawRecord currentRecord = null;
         private Queue<RawRecord> outputBuffer;
@@ -1508,12 +1511,14 @@ namespace GraphView
             List<int> inputIndexes,
             GraphViewExecutionOperator optionalTraversal,
             ConstantSourceOperator contextOp,
+            ContainerOperator containerOp,
             bool isCarryOnMode)
         {
             this.inputOp = inputOp;
             this.inputIndexes = inputIndexes;
             this.optionalTraversal = optionalTraversal;
             this.contextOp = contextOp;
+            this.rootContainerOp = containerOp;
 
             this.isCarryOnMode = isCarryOnMode;
             this.optionalTraversalHasResults = false;
@@ -1635,6 +1640,7 @@ namespace GraphView
             currentRecord = null;
             inputOp.ResetState();
             contextOp.ResetState();
+            rootContainerOp?.ResetState();
             optionalTraversal.ResetState();
             outputBuffer?.Clear();
             Open();
@@ -1645,15 +1651,16 @@ namespace GraphView
     {
         private List<Tuple<ConstantSourceOperator, GraphViewExecutionOperator>> traversalList;
         private int activeTraversalIndex;
-
+        private ContainerOperator rootContainerOp;
         //
         // Only for union() without any branch
         //
         private GraphViewExecutionOperator inputOp;
 
-        public UnionOperator(GraphViewExecutionOperator inputOp)
+        public UnionOperator(GraphViewExecutionOperator inputOp, ContainerOperator containerOp)
         {
             this.inputOp = inputOp;
+            this.rootContainerOp = containerOp;
             traversalList = new List<Tuple<ConstantSourceOperator, GraphViewExecutionOperator>>();
             Open();
             activeTraversalIndex = 0;
@@ -1707,16 +1714,16 @@ namespace GraphView
 
         public override void ResetState()
         {
-            if (traversalList.Count == 0)
-            {
+            if (traversalList.Count == 0) {
                 inputOp.ResetState();
             }
 
-            foreach (Tuple<ConstantSourceOperator, GraphViewExecutionOperator> tuple in traversalList)
-            {
+            foreach (Tuple<ConstantSourceOperator, GraphViewExecutionOperator> tuple in traversalList) {
                 tuple.Item2.ResetState();
             }
 
+            rootContainerOp.ResetState();
+            activeTraversalIndex = 0;
             Open();
         }
     }
@@ -2044,14 +2051,14 @@ namespace GraphView
     internal class DeduplicateOperator : GraphViewExecutionOperator
     {
         private GraphViewExecutionOperator _inputOp;
-        private HashSet<FieldObject> _fieldValueSet;
-        private int _targetFieldIndex;
+        private HashSet<string> _dedupStringSet;
+        private List<ScalarFunction> _targetValueFunctionList;
 
-        internal DeduplicateOperator(GraphViewExecutionOperator pInputOperator, int pTargetFieldIndex)
+        internal DeduplicateOperator(GraphViewExecutionOperator inputOperator, List<ScalarFunction> targetValueFunctionList)
         {
-            _inputOp = pInputOperator;
-            _targetFieldIndex = pTargetFieldIndex;
-            _fieldValueSet = new HashSet<FieldObject>();
+            _inputOp = inputOperator;
+            _targetValueFunctionList = targetValueFunctionList;
+            _dedupStringSet = new HashSet<string>();
             this.Open();
         }
 
@@ -2061,9 +2068,22 @@ namespace GraphView
 
             while (_inputOp.State() && (srcRecord = _inputOp.Next()) != null)
             {
-                if (_fieldValueSet.Contains(srcRecord[_targetFieldIndex])) continue;
+                StringBuilder compositeDeduplicateStringBuilder = new StringBuilder();
 
-                _fieldValueSet.Add(srcRecord[_targetFieldIndex]);
+                foreach (ScalarFunction func in _targetValueFunctionList)
+                {
+                    string deduplicateString = func.Evaluate(srcRecord)?.ToValue;
+                    if (deduplicateString == null)
+                        throw new GraphViewException("The provided traversal or property name of Dedup does not map to a value.");
+
+                    compositeDeduplicateStringBuilder.Append(deduplicateString);
+                }
+
+                string compositeDedupString = compositeDeduplicateStringBuilder.ToString();
+                if (_dedupStringSet.Contains(compositeDedupString))
+                    continue;
+
+                _dedupStringSet.Add(compositeDedupString);
                 return srcRecord;
             }
 
@@ -2074,7 +2094,7 @@ namespace GraphView
         public override void ResetState()
         {
             _inputOp.ResetState();
-            _fieldValueSet?.Clear();
+            _dedupStringSet?.Clear();
             Open();
         }
     }
@@ -2235,17 +2255,66 @@ namespace GraphView
         }
     }
 
+    internal class AggregateOperator : GraphViewExecutionOperator
+    {
+        CollectionFunction aggregateState;
+        GraphViewExecutionOperator inputOp;
+        ScalarFunction getAggregateObjectFunction;
+        Queue<RawRecord> outputBuffer;
+
+        public AggregateOperator(GraphViewExecutionOperator inputOp, ScalarFunction getTargetFieldFunction, CollectionFunction aggregateState)
+        {
+            this.aggregateState = aggregateState;
+            this.inputOp = inputOp;
+            this.getAggregateObjectFunction = getTargetFieldFunction;
+            this.outputBuffer = new Queue<RawRecord>();
+
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord r = null;
+            while (inputOp.State() && (r = inputOp.Next()) != null)
+            {
+                RawRecord result = new RawRecord(r);
+
+                FieldObject aggregateObject = getAggregateObjectFunction.Evaluate(r);
+
+                if (aggregateObject == null)
+                    throw new GraphViewException("The provided traversal or property name in Aggregate does not map to a value.");
+
+                aggregateState.Accumulate(aggregateObject);
+
+                result.Append(aggregateState.CollectionField);
+
+                outputBuffer.Enqueue(result);
+            }
+
+            if (outputBuffer.Count <= 1) Close();
+            if (outputBuffer.Count != 0) return outputBuffer.Dequeue();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            //aggregateState.Init();
+            inputOp.ResetState();
+            Open();
+        }
+    }
+
     internal class StoreOperator : GraphViewExecutionOperator
     {
-        public StoreStateFunction StoreState { get; private set; }
+        CollectionFunction storeState;
         GraphViewExecutionOperator inputOp;
-        ScalarFunction getTargetFieldFunction;
+        ScalarFunction getStoreObjectFunction;
 
-        public StoreOperator(GraphViewExecutionOperator inputOp, ScalarFunction getTargetFieldFunction)
+        public StoreOperator(GraphViewExecutionOperator inputOp, ScalarFunction getTargetFieldFunction, CollectionFunction storeState)
         {
-            StoreState = new StoreStateFunction();
+            this.storeState = storeState;
             this.inputOp = inputOp;
-            this.getTargetFieldFunction = getTargetFieldFunction;
+            this.getStoreObjectFunction = getTargetFieldFunction;
             Open();
         }
 
@@ -2260,13 +2329,22 @@ namespace GraphView
                     return null;
                 }
 
-                StoreState.Accumulate(getTargetFieldFunction.Evaluate(r));
+                RawRecord result = new RawRecord(r);
+
+                FieldObject storeObject = getStoreObjectFunction.Evaluate(r);
+
+                if (storeObject == null)
+                    throw new GraphViewException("The provided traversal or property name in Store does not map to a value.");
+
+                storeState.Accumulate(storeObject);
+
+                result.Append(storeState.CollectionField);
 
                 if (!inputOp.State())
                 {
                     Close();
                 }
-                return r;
+                return result;
             }
 
             return null;
@@ -2274,35 +2352,42 @@ namespace GraphView
 
         public override void ResetState()
         {
-            //StoreState.Init();
+            //storeState.Init();
             inputOp.ResetState();
             Open();
         }
     }
 
+
+    //
+    // Note: our BarrierOperator's semantics is not the same the one's in Gremlin
+    //
     internal class BarrierOperator : GraphViewExecutionOperator
     {
         private GraphViewExecutionOperator _inputOp;
         private Queue<RawRecord> _outputBuffer;
+        private int _outputBufferSize;
 
-        public BarrierOperator(GraphViewExecutionOperator inputOp)
+        public BarrierOperator(GraphViewExecutionOperator inputOp, int outputBufferSize = -1)
         {
             _inputOp = inputOp;
-            _outputBuffer = null;
+            _outputBuffer = new Queue<RawRecord>();
+            _outputBufferSize = outputBufferSize;
             Open();
         }
           
         public override RawRecord Next()
         {
-            if (_outputBuffer == null)
-            {
-                _outputBuffer = new Queue<RawRecord>();
-                RawRecord record;
+            while (_outputBuffer.Any()) {
+                return _outputBuffer.Dequeue();
+            }
 
-                while (_inputOp.State() && (record = _inputOp.Next()) != null)
-                {
-                    _outputBuffer.Enqueue(record);
-                }
+            RawRecord record;
+            while ((_outputBufferSize == -1 || _outputBuffer.Count <= _outputBufferSize) 
+                    && _inputOp.State() 
+                    && (record = _inputOp.Next()) != null)
+            {
+                _outputBuffer.Enqueue(record);
             }
 
             if (_outputBuffer.Count <= 1) Close();
@@ -2313,7 +2398,7 @@ namespace GraphView
         public override void ResetState()
         {
             _inputOp.ResetState();
-            _outputBuffer = null;
+            _outputBuffer.Clear();
             Open();
         }
     }
@@ -2392,6 +2477,7 @@ namespace GraphView
         {
             _inputOp = pInputOp;
             _propertyFieldIndex = pPropertyFieldIndex;
+            Open();
         }
 
 
@@ -2431,6 +2517,7 @@ namespace GraphView
         {
             _inputOp = pInputOp;
             _propertyFieldIndex = pPropertyFieldIndex;
+            Open();
         }
 
         public override RawRecord Next()
@@ -2463,10 +2550,12 @@ namespace GraphView
     internal class QueryDerivedTableOperator : GraphViewExecutionOperator
     {
         private GraphViewExecutionOperator _queryOp;
+        private ContainerOperator _rootContainerOp;
 
-        public QueryDerivedTableOperator(GraphViewExecutionOperator queryOp)
+        public QueryDerivedTableOperator(GraphViewExecutionOperator queryOp, ContainerOperator containerOp)
         {
             _queryOp = queryOp;
+            _rootContainerOp = containerOp;
 
             Open();
         }
@@ -2487,6 +2576,612 @@ namespace GraphView
         public override void ResetState()
         {
             _queryOp.ResetState();
+            _rootContainerOp?.ResetState();
+
+            Open();
+        }
+    }
+
+    internal class CountLocalOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _objectIndex;
+
+        public CountLocalOperator(GraphViewExecutionOperator inputOp, int objectIndex)
+        {
+            _inputOp = inputOp;
+            _objectIndex = objectIndex;
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                RawRecord result = new RawRecord(currentRecord);
+                FieldObject obj = currentRecord[_objectIndex];
+                Debug.Assert(obj != null, "The input of the CountLocalOperator should not be null.");
+
+                if (obj is CollectionField)
+                    result.Append(new StringField(((CollectionField)obj).Collection.Count.ToString(), JsonDataType.Long));
+                else if (obj is MapField)
+                    result.Append(new StringField(((MapField)obj).Map.Count.ToString(), JsonDataType.Long));
+                else if (obj is TreeField)
+                    result.Append(new StringField(((TreeField)obj).Children.Count.ToString(), JsonDataType.Long));
+                else
+                    result.Append(new StringField("1", JsonDataType.Int));
+
+                return result;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            Open();
+        }
+    }
+
+    internal class SumLocalOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _objectIndex;
+
+        public SumLocalOperator(GraphViewExecutionOperator inputOp, int objectIndex)
+        {
+            _inputOp = inputOp;
+            _objectIndex = objectIndex;
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                FieldObject obj = currentRecord[_objectIndex];
+                Debug.Assert(obj != null, "The input of the SumLocalOperator should not be null.");
+
+                double sum = 0.0;
+                double current;
+
+                if (obj is CollectionField)
+                {
+                    foreach (FieldObject fieldObject in ((CollectionField)obj).Collection)
+                    {
+                        if (!double.TryParse(fieldObject.ToValue, out current))
+                            throw new GraphViewException("The element of the local object cannot be cast to a number");
+
+                        sum += current;
+                    }
+                }
+                else {
+                    sum = double.TryParse(obj.ToValue, out current) ? current : double.NaN;
+                }
+
+                RawRecord result = new RawRecord(currentRecord);
+                result.Append(new StringField(sum.ToString(CultureInfo.InvariantCulture), JsonDataType.Double));
+
+                return result;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            Open();
+        }
+    }
+
+    internal class MaxLocalOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _objectIndex;
+
+        public MaxLocalOperator(GraphViewExecutionOperator inputOp, int objectIndex)
+        {
+            _inputOp = inputOp;
+            _objectIndex = objectIndex;
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                FieldObject obj = currentRecord[_objectIndex];
+                Debug.Assert(obj != null, "The input of the MaxLocalOperator should not be null.");
+
+                double max = double.MinValue;
+                double current;
+
+                if (obj is CollectionField)
+                {
+                    foreach (FieldObject fieldObject in ((CollectionField)obj).Collection)
+                    {
+                        if (!double.TryParse(fieldObject.ToValue, out current))
+                            throw new GraphViewException("The element of the local object cannot be cast to a number");
+
+                        if (max < current)
+                            max = current;
+                    }
+                }
+                else {
+                    max = double.TryParse(obj.ToValue, out current) ? current : double.NaN;
+                }
+
+                RawRecord result = new RawRecord(currentRecord);
+                result.Append(new StringField(max.ToString(CultureInfo.InvariantCulture), JsonDataType.Double));
+
+                return result;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            Open();
+        }
+    }
+
+    internal class MinLocalOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _objectIndex;
+
+        public MinLocalOperator(GraphViewExecutionOperator inputOp, int objectIndex)
+        {
+            _inputOp = inputOp;
+            _objectIndex = objectIndex;
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                FieldObject obj = currentRecord[_objectIndex];
+                Debug.Assert(obj != null, "The input of the MinLocalOperator should not be null.");
+
+                double min = double.MaxValue;
+                double current;
+
+                if (obj is CollectionField)
+                {
+                    foreach (FieldObject fieldObject in ((CollectionField)obj).Collection)
+                    {
+                        if (!double.TryParse(fieldObject.ToValue, out current))
+                            throw new GraphViewException("The element of the local object cannot be cast to a number");
+
+                        if (current < min)
+                            min = current;
+                    }
+                }
+                else {
+                    min = double.TryParse(obj.ToValue, out current) ? current : double.NaN;
+                }
+
+                RawRecord result = new RawRecord(currentRecord);
+                result.Append(new StringField(min.ToString(CultureInfo.InvariantCulture), JsonDataType.Double));
+
+                return result;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            Open();
+        }
+    }
+
+    internal class MeanLocalOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _objectIndex;
+
+        public MeanLocalOperator(GraphViewExecutionOperator inputOp, int objectIndex)
+        {
+            _inputOp = inputOp;
+            _objectIndex = objectIndex;
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                FieldObject obj = currentRecord[_objectIndex];
+                Debug.Assert(obj != null, "The input of the MeanLocalOperator should not be null.");
+
+                double sum = 0.0;
+                long count = 0;
+                double current;
+
+                if (obj is CollectionField)
+                {
+                    foreach (FieldObject fieldObject in ((CollectionField)obj).Collection)
+                    {
+                        if (!double.TryParse(fieldObject.ToValue, out current))
+                            throw new GraphViewException("The element of the local object cannot be cast to a number");
+
+                        sum += current;
+                        count++;
+                    }
+                }
+                else
+                {
+                    count = 1;
+                    sum = double.TryParse(obj.ToValue, out current) ? current : double.NaN;
+                }
+
+                RawRecord result = new RawRecord(currentRecord);
+                result.Append(new StringField((sum / count).ToString(CultureInfo.InvariantCulture), JsonDataType.Double));
+
+                return result;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            Open();
+        }
+    }
+
+    internal class SimplePathOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _pathIndex;
+        private HashSet<string> _intermediateResultSet;
+
+        public SimplePathOperator(GraphViewExecutionOperator inputOp, int pathIndex)
+        {
+            _inputOp = inputOp;
+            _pathIndex = pathIndex;
+            _intermediateResultSet = new HashSet<string>();
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                RawRecord result = new RawRecord(currentRecord);
+                CollectionField path = currentRecord[_pathIndex] as CollectionField;
+
+                Debug.Assert(path != null, "The input of the simplePath filter should be a CollectionField generated by path().");
+
+                bool isSimplePath = true;
+                foreach (FieldObject fieldObject in path.Collection)
+                {
+                    string intermediateResult = fieldObject.ToValue;
+
+                    if (_intermediateResultSet.Contains(intermediateResult))
+                    {
+                        isSimplePath = false;
+                        break;
+                    }
+                        
+                    _intermediateResultSet.Add(intermediateResult);
+                }
+
+                if (isSimplePath) {
+                    return result;
+                }
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            _intermediateResultSet.Clear();
+            Open();
+        }
+    }
+
+    internal class CyclicPathOperator : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator _inputOp;
+        private int _pathIndex;
+        private HashSet<string> _intermediateResultSet;
+
+        public CyclicPathOperator(GraphViewExecutionOperator inputOp, int pathIndex)
+        {
+            _inputOp = inputOp;
+            _pathIndex = pathIndex;
+            _intermediateResultSet = new HashSet<string>();
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord;
+
+            while (_inputOp.State() && (currentRecord = _inputOp.Next()) != null)
+            {
+                RawRecord result = new RawRecord(currentRecord);
+                CollectionField path = currentRecord[_pathIndex] as CollectionField;
+
+                Debug.Assert(path != null, "The input of the cyclicPath filter should be a CollectionField generated by path().");
+
+                bool isCyclicPath = false;
+                foreach (FieldObject fieldObject in path.Collection)
+                {
+                    string intermediateResult = fieldObject.ToValue;
+
+                    if (_intermediateResultSet.Contains(intermediateResult))
+                    {
+                        isCyclicPath = true;
+                        break;
+                    }
+
+                    _intermediateResultSet.Add(intermediateResult);
+                }
+
+                if (isCyclicPath) {
+                    return result;
+                }
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            _inputOp.ResetState();
+            _intermediateResultSet.Clear();
+            Open();
+        }
+    }
+
+    internal class ChooseOperator : GraphViewExecutionOperator
+    {
+        GraphViewExecutionOperator inputOp;
+
+        ScalarFunction scalarSubQueryFunc;
+
+        ConstantSourceOperator tempSourceOp;
+        ContainerOperator trueBranchSourceOp;
+        ContainerOperator falseBranchSourceOp;
+
+        Queue<RawRecord> evaluatedTrueRecords;
+        Queue<RawRecord> evaluatedFalseRecords;
+
+        GraphViewExecutionOperator trueBranchTraversalOp;
+        GraphViewExecutionOperator falseBranchTraversalOp;
+
+        public ChooseOperator(
+            GraphViewExecutionOperator inputOp,
+            ScalarFunction scalarSubQueryFunc,
+            ConstantSourceOperator tempSourceOp,
+            ContainerOperator trueBranchSourceOp,
+            GraphViewExecutionOperator trueBranchTraversalOp,
+            ContainerOperator falseBranchSourceOp,
+            GraphViewExecutionOperator falseBranchTraversalOp
+            )
+        {
+            this.inputOp = inputOp;
+            this.scalarSubQueryFunc = scalarSubQueryFunc;
+            this.tempSourceOp = tempSourceOp;
+            this.trueBranchSourceOp = trueBranchSourceOp;
+            this.trueBranchTraversalOp = trueBranchTraversalOp;
+            this.falseBranchSourceOp = falseBranchSourceOp;
+            this.falseBranchTraversalOp = falseBranchTraversalOp;
+
+            Open();
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord = null;
+            while (inputOp.State() && (currentRecord = inputOp.Next()) != null)
+            {
+                if (scalarSubQueryFunc.Evaluate(currentRecord) != null)
+                    evaluatedTrueRecords.Enqueue(currentRecord);
+                else
+                    evaluatedFalseRecords.Enqueue(currentRecord);
+            }
+
+            while (evaluatedTrueRecords.Any())
+            {
+                tempSourceOp.ConstantSource = evaluatedTrueRecords.Dequeue();
+                trueBranchSourceOp.Next();
+            }
+
+            RawRecord trueBranchTraversalRecord;
+            while (trueBranchTraversalOp.State() && (trueBranchTraversalRecord = trueBranchTraversalOp.Next()) != null) {
+                return trueBranchTraversalRecord;
+            }
+
+            while (evaluatedFalseRecords.Any())
+            {
+                tempSourceOp.ConstantSource = evaluatedTrueRecords.Dequeue();
+                falseBranchSourceOp.Next();
+            }
+
+            RawRecord falseBranchTraversalRecord;
+            while (falseBranchTraversalOp.State() && (falseBranchTraversalRecord = falseBranchTraversalOp.Next()) != null) {
+                return falseBranchTraversalRecord;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            inputOp.ResetState();
+            evaluatedTrueRecords.Clear();
+            evaluatedFalseRecords.Clear();
+            trueBranchSourceOp.ResetState();
+            falseBranchSourceOp.ResetState();
+            trueBranchTraversalOp.ResetState();
+            falseBranchTraversalOp.ResetState();
+
+            Open();
+        }
+    }
+
+    internal class ChooseWithOptionsOperator : GraphViewExecutionOperator
+    {
+        GraphViewExecutionOperator inputOp;
+
+        ScalarFunction scalarSubQueryFunc;
+
+        ConstantSourceOperator tempSourceOp;
+        ContainerOperator optionSourceOp;
+
+        int activeOptionTraversalIndex;
+        bool needsOptionSourceInit;
+        List<Tuple<object, Queue<RawRecord>, GraphViewExecutionOperator>> traversalList;
+
+        Queue<RawRecord> noneRawRecords;
+        GraphViewExecutionOperator optionNoneTraversalOp;
+
+        public ChooseWithOptionsOperator(
+            GraphViewExecutionOperator inputOp,
+            ScalarFunction scalarSubQueryFunc,
+            ConstantSourceOperator tempSourceOp,
+            ContainerOperator optionSourceOp,
+            GraphViewExecutionOperator optionNoneTraversalOp
+            )
+        {
+            this.inputOp = inputOp;
+            this.scalarSubQueryFunc = scalarSubQueryFunc;
+            this.tempSourceOp = tempSourceOp;
+            this.optionSourceOp = optionSourceOp;
+            this.activeOptionTraversalIndex = 0;
+            this.noneRawRecords = new Queue<RawRecord>();
+            this.optionNoneTraversalOp = optionNoneTraversalOp;
+            this.needsOptionSourceInit = true;
+
+            Open();
+        }
+
+        public void AddOptionTraversal(object value, GraphViewExecutionOperator optionTraversalOp)
+        {
+            traversalList.Add(new Tuple<object, Queue<RawRecord>, GraphViewExecutionOperator>(value,
+                new Queue<RawRecord>(), optionTraversalOp));
+        }
+
+        private void PrepareOptionTraversalSource(int index)
+        {
+            optionSourceOp.ResetState();
+            Queue<RawRecord> chosenRecords = index != -1 ? traversalList[index].Item2 : noneRawRecords;
+            while (chosenRecords.Any())
+            {
+                tempSourceOp.ConstantSource = chosenRecords.Dequeue();
+                optionSourceOp.Next();
+            }
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord currentRecord = null;
+            while (inputOp.State() && (currentRecord = inputOp.Next()) != null)
+            {
+                FieldObject evaluatedValue = scalarSubQueryFunc.Evaluate(currentRecord);
+                if (evaluatedValue == null) {
+                    throw new GraphViewException("The provided traversal of choose() does not map to a value.");
+                }
+
+                bool hasBeenChosen = false;
+                foreach (Tuple<object, Queue<RawRecord>, GraphViewExecutionOperator> tuple in traversalList)
+                {
+                    if (evaluatedValue.ToValue.Equals(tuple.Item1.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        tuple.Item2.Enqueue(currentRecord);
+                        hasBeenChosen = true;
+                        break;
+                    }
+                }
+
+                if (!hasBeenChosen && optionNoneTraversalOp != null) {
+                    noneRawRecords.Enqueue(currentRecord);
+                }
+            }
+
+            RawRecord traversalRecord = null;
+            while (activeOptionTraversalIndex < traversalList.Count)
+            {
+                if (needsOptionSourceInit)
+                {
+                    PrepareOptionTraversalSource(activeOptionTraversalIndex);
+                    needsOptionSourceInit = false;
+                }
+
+                GraphViewExecutionOperator optionTraversalOp = traversalList[activeOptionTraversalIndex].Item3;
+                
+                while (optionTraversalOp.State() && (traversalRecord = optionTraversalOp.Next()) != null) {
+                    return traversalRecord;
+                }
+
+                activeOptionTraversalIndex++;
+                needsOptionSourceInit = true;
+            }
+
+            if (optionNoneTraversalOp != null)
+            {
+                if (needsOptionSourceInit)
+                {
+                    PrepareOptionTraversalSource(-1);
+                    needsOptionSourceInit = false;
+                }
+
+                while (optionNoneTraversalOp.State() && (traversalRecord = optionNoneTraversalOp.Next()) != null) {
+                    return traversalRecord;
+                }
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            inputOp.ResetState();
+            optionSourceOp.ResetState();
+            needsOptionSourceInit = true;
+            activeOptionTraversalIndex = 0;
+            noneRawRecords.Clear();
+            optionNoneTraversalOp?.ResetState();
+
+            foreach (Tuple<object, Queue<RawRecord>, GraphViewExecutionOperator> tuple in traversalList)
+            {
+                tuple.Item2.Clear();
+                tuple.Item3.ResetState();
+            }
 
             Open();
         }

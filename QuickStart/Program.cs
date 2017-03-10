@@ -80,14 +80,25 @@ namespace QuickStart
                 Where(Predicate.neq("a")).Both().Where(Predicate.neq("b")).Path().Next();
             print("5)", res);
 
+            // 6)
+            graph.g().V().Has("name", "marko").Property("age", "25").Next();
+            res = graph.g().V().Has("name", "marko").Values("age").Next();
+            print("6)", res);
 
-            // 6) ask GraphView "marko"'s 2-hop destinations
+            // 7)
+            graph.g().V().Has("name", "vadas").Drop().Next();            
+            res = graph.g().V().Has("name", "vadas").Next();
+            print("7)", res);
+            graph.g().AddV("person").Property("age", "27").Property("name", "vadas").Next();
+            graph.g().V().Has("name", "marko").AddE("knows").Property("weight", 0.5).To(graph.g().V().Has("name", "vadas")).Next();
+
+            // 8) ask GraphView "marko"'s 2-hop destinations
             res = graph.g().V().Has("name", "marko").
                 Repeat(GraphTraversal2.__().Out()).Times(2).
                 Values("name").Next();
-            print("6)", res);
+            print("8)", res);
 
-            // 7) for every person, if possible, find out what is created by who this person knows; output the type and name of every result
+            // 9) for every person, if possible, find out what is created by who this person knows; output the type and name of every result
             res = graph.g().V().HasLabel("person").
                 Optional(GraphTraversal2.__().Out("knows")).
                 Optional(GraphTraversal2.__().Out("created")).
@@ -95,7 +106,9 @@ namespace QuickStart
                 Project("type","name").
                 By(GraphTraversal2.__().Label()).
                 By(GraphTraversal2.__().Values("name")).Next();
-            print("7)", res);
+            print("9)", res);
+
+            
 
             System.Console.WriteLine("Finished");
             System.Console.ReadKey();

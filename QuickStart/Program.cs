@@ -68,8 +68,7 @@ namespace QuickStart
             print("2*)", res);
 
             // 3) ask GraphView the average age of "vadas" and "marko"
-            res = graph.g().V().Has("name", Predicate.within("vadas", "marko")).Values("age").Mean().Next();
-            print("3)", res);
+              print("3)", res);
 
             // 4) ask GraphView what common software(out neighbor) do "josh" and "peter" share?
             res = graph.g().V().Has("name", "josh").Out("created").As("common").In("created").Has("name", "peter").Select("common").Values("name").Next();
@@ -80,25 +79,25 @@ namespace QuickStart
                 Where(Predicate.neq("a")).Both().Where(Predicate.neq("b")).Path().Next();
             print("5)", res);
 
-            // 6)
+            // 6) change the age of "marko" into 25
             graph.g().V().Has("name", "marko").Property("age", "25").Next();
             res = graph.g().V().Has("name", "marko").Values("age").Next();
             print("6)", res);
 
-            // 7)
+            // 7) delete node "vadas" and all of its adjancent edges
             graph.g().V().Has("name", "vadas").Drop().Next();            
             res = graph.g().V().Has("name", "vadas").Next();
             print("7)", res);
             graph.g().AddV("person").Property("age", "27").Property("name", "vadas").Next();
             graph.g().V().Has("name", "marko").AddE("knows").Property("weight", 0.5).To(graph.g().V().Has("name", "vadas")).Next();
 
-            // 8) ask GraphView "marko"'s 2-hop destinations
+            // 8*) ask GraphView "marko"'s 2-hop destinations
             res = graph.g().V().Has("name", "marko").
                 Repeat(GraphTraversal2.__().Out()).Times(2).
                 Values("name").Next();
             print("8)", res);
 
-            // 9) for every person, if possible, find out what is created by who this person knows; output the type and name of every result
+            // 9*) for every person, if possible, find out what is created by who this person knows; output the type and name of every result
             res = graph.g().V().HasLabel("person").
                 Optional(GraphTraversal2.__().Out("knows")).
                 Optional(GraphTraversal2.__().Out("created")).

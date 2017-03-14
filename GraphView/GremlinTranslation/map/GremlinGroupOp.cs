@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -6,63 +7,94 @@ using System.Threading.Tasks;
 
 namespace GraphView
 {
-    internal class GremlinGroupOp: GremlinTranslationOperator, IGremlinByModulating
+    internal class GremlinGroupOp: GremlinTranslationOperator
     {
         public string SideEffect { get; set; }
-        public List<object> ByParameters { get; set; }
+        public GraphTraversal2 GroupBy { get; set; }
+        public GraphTraversal2 ProjectBy { get; set; }
+        public bool IsProjectingACollection { get; set; }
 
         public GremlinGroupOp()
         {
-            ByParameters = new List<object>();
+            IsProjectingACollection = true;
         }
 
         public GremlinGroupOp(string sideEffect)
         {
             SideEffect = sideEffect;
-            ByParameters = new List<object>();
+            IsProjectingACollection = true;
         }
 
         internal override GremlinToSqlContext GetContext()
         {
             GremlinToSqlContext inputContext = GetInputContext();
-
-            List<object> byParameters = new List<object>();
-            foreach (var parameter in ByParameters)
+            if (inputContext.PivotVariable == null)
             {
-                if (parameter is GraphTraversal2)
-                {
-                    (parameter as GraphTraversal2).GetStartOp().InheritedVariableFromParent(inputContext);
-                    byParameters.Add((parameter as GraphTraversal2).GetEndOp().GetContext());
-                }
-                else
-                {
-                    byParameters.Add(parameter);
-                }
+                throw new QueryCompilationException("The PivotVariable can't be null.");
             }
 
-            inputContext.PivotVariable.Group(inputContext, SideEffect, byParameters);
+            if (GroupBy == null)
+                GroupBy = GraphTraversal2.__();
+            if (ProjectBy == null)
+                ProjectBy = GraphTraversal2.__();
+
+            GroupBy.GetStartOp().InheritedVariableFromParent(inputContext);
+            ProjectBy.GetStartOp().InheritedVariableFromParent(inputContext);
+            GremlinToSqlContext groupByContext = GroupBy.GetEndOp().GetContext();
+            GremlinToSqlContext projectContext = ProjectBy.GetEndOp().GetContext();
+
+            inputContext.PivotVariable.Group(inputContext, SideEffect, groupByContext, projectContext, IsProjectingACollection);
 
             return inputContext;
         }
 
-        public void ModulateBy()
+        public override void ModulateBy()
         {
-            throw new NotImplementedException();
+            if (GroupBy == null)
+            {
+                GroupBy = GraphTraversal2.__();
+            }
+            else if (ProjectBy == null)
+            {
+                ProjectBy = GraphTraversal2.__();
+            }
+            else
+            {
+                throw new QueryCompilationException("The key and value traversals for group()-step have already been set");
+            }
         }
 
-        public void ModulateBy(GraphTraversal2 paramOp)
+        public override void ModulateBy(GraphTraversal2 traversal)
         {
-            ByParameters.Add(paramOp);
+            if (GroupBy == null)
+            {
+                GroupBy = traversal;
+            }
+            else if (ProjectBy == null)
+            {
+                ProjectBy = traversal;
+                IsProjectingACollection = false;
+            }
+            else
+            {
+                throw new QueryCompilationException("The key and value traversals for group()-step have already been set");
+            }
         }
 
-        public void ModulateBy(string key)
+        public override void ModulateBy(string key)
         {
-            ByParameters.Add(key);
-        }
-
-        public void ModulateBy(GremlinKeyword.Order order)
-        {
-            throw new NotImplementedException();
+            if (GroupBy == null)
+            {
+                GroupBy = GraphTraversal2.__().Values(key);
+            }
+            else if (ProjectBy == null)
+            {
+                ProjectBy = GraphTraversal2.__().Values(key);
+            }
+            else
+            {
+                throw new QueryCompilationException("The key and value traversals for group()-step have already been set");
+            }
         }
     }
 }

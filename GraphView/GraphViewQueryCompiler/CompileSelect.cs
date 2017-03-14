@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -194,37 +195,141 @@ namespace GraphView
             }
         }
 
-        /// <summary>
-        /// This function works like the FillMetaField function in the AdjacencyListDecoder
-        /// </summary>
-        /// <param name="edge"></param>
-        /// <returns></returns>
-        [Obsolete]
-        internal static string ConstructMetaFieldSelectClauseOfEdge(MatchEdge edge)
-        {
-            StringBuilder metaFieldSelectStringBuilder = new StringBuilder();
-            bool isStartVertexTheOriginVertex = edge.IsReversed;
-            bool isReversedAdjList = IsTraversalThroughPhysicalReverseEdge(edge);
-            string nodeId = edge.SourceNode.NodeAlias + ".id";
-            string edgeSink = edge.EdgeAlias + "._otherV";
-            string edgeId = edge.EdgeAlias + "._offset";
-            string edgeReverseId = edge.EdgeAlias + "._reverse_ID";
+        ///// <summary>
+        ///// This function works like the FillMetaField function in the AdjacencyListDecoder
+        ///// </summary>
+        ///// <param name="edge"></param>
+        ///// <returns></returns>
+        //[Obsolete]
+        //internal static string ConstructMetaFieldSelectClauseOfEdge(MatchEdge edge)
+        //{
+        //    StringBuilder metaFieldSelectStringBuilder = new StringBuilder();
+        //    bool isStartVertexTheOriginVertex = edge.IsReversed;
+        //    bool isReversedAdjList = IsTraversalThroughPhysicalReverseEdge(edge);
+        //    string nodeId = edge.SourceNode.NodeAlias + ".id";
+        //    string edgeSink = edge.EdgeAlias + "._otherV";
+        //    string edgeId = edge.EdgeAlias + "._offset";
+        //    string edgeReverseId = edge.EdgeAlias + "._reverse_ID";
 
-            string sourceValue = isReversedAdjList ? edgeSink : nodeId;
-            string sinkValue = isReversedAdjList ? nodeId : edgeSink;
-            string otherValue = isStartVertexTheOriginVertex ? edgeSink : nodeId;
-            string edgeIdValue = isReversedAdjList ? edgeReverseId : edgeId;
+        //    string sourceValue = isReversedAdjList ? edgeSink : nodeId;
+        //    string sinkValue = isReversedAdjList ? nodeId : edgeSink;
+        //    string otherValue = isStartVertexTheOriginVertex ? edgeSink : nodeId;
+        //    string edgeIdValue = isReversedAdjList ? edgeReverseId : edgeId;
 
-            metaFieldSelectStringBuilder.Append(", ").Append($"{sourceValue} AS {edge.EdgeAlias}_source");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{sinkValue} AS {edge.EdgeAlias}_sink");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{otherValue} AS {edge.EdgeAlias}_other");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{edgeIdValue} AS {edge.EdgeAlias}_ID");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{edgeId} AS {edge.EdgeAlias}_physical_ID");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{(isReversedAdjList ? "_reverse_edge" : "_edge")} AS adjType");
-            metaFieldSelectStringBuilder.Append(", ").Append($"{edge.EdgeAlias} AS {edge.EdgeAlias}");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{sourceValue} AS {edge.EdgeAlias}_source");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{sinkValue} AS {edge.EdgeAlias}_sink");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{otherValue} AS {edge.EdgeAlias}_other");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{edgeIdValue} AS {edge.EdgeAlias}_ID");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{edgeId} AS {edge.EdgeAlias}_physical_ID");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{(isReversedAdjList ? "_reverse_edge" : "_edge")} AS adjType");
+        //    metaFieldSelectStringBuilder.Append(", ").Append($"{edge.EdgeAlias} AS {edge.EdgeAlias}");
 
-            return metaFieldSelectStringBuilder.ToString();
-        }
+        //    return metaFieldSelectStringBuilder.ToString();
+        //}
+
+        //internal static void ConstructJsonQueryOnNode(MatchNode node, List<MatchEdge> backwardMatchingEdges = null)
+        //{
+        //    string nodeAlias = node.NodeAlias;
+        //    StringBuilder selectStrBuilder = new StringBuilder();
+        //    StringBuilder joinStrBuilder = new StringBuilder();
+        //    List<string> properties = new List<string> { nodeAlias };
+        //    List<ColumnGraphType> projectedColumnsType = new List<ColumnGraphType>();
+           
+        //    WBooleanExpression searchCondition = null;
+
+        //    properties.Add("id");
+        //    projectedColumnsType.Add(ColumnGraphType.VertexId);
+        //    //selectStrBuilder.Append(nodeAlias + ".id");
+        //    properties.Add("label");
+        //    projectedColumnsType.Add(ColumnGraphType.Value);
+        //    //selectStrBuilder.Append(nodeAlias + ".label");
+        //    properties.Add("_edge");
+        //    projectedColumnsType.Add(ColumnGraphType.OutAdjacencyList);
+        //    //selectStrBuilder.Append(", ").Append(nodeAlias + "._edge");
+        //    properties.Add("_reverse_edge");
+        //    projectedColumnsType.Add(ColumnGraphType.InAdjacencyList);
+        //    //selectStrBuilder.Append(", ").Append(nodeAlias + "._reverse_edge");
+        //    // This takes care of the node.* property
+        //    properties.Add("*");
+        //    projectedColumnsType.Add(ColumnGraphType.VertexObject);
+        //    //selectStrBuilder.Append(", ").Append(nodeAlias);
+
+        //    selectStrBuilder.Append(nodeAlias);
+
+        //    for (int i = GraphViewReservedProperties.ReservedNodeProperties.Count; i < node.Properties.Count; i++)
+        //    {
+        //        string selectName = nodeAlias + "." + node.Properties[i];
+        //        properties.Add(node.Properties[i]);
+        //        projectedColumnsType.Add(ColumnGraphType.Value);
+        //        //selectStrBuilder.Append(", ").Append(selectName);
+        //    }
+                
+        //    foreach (WBooleanExpression predicate in node.Predicates)
+        //        searchCondition = WBooleanBinaryExpression.Conjunction(searchCondition, predicate);
+
+        //    if (backwardMatchingEdges == null)
+        //        backwardMatchingEdges = new List<MatchEdge>();
+
+        //    //
+        //    // Currently, no backwardMatchingEdges will be produced
+        //    //
+        //    foreach (MatchEdge edge in backwardMatchingEdges)
+        //    {
+        //        joinStrBuilder.Append(" Join ")
+        //            .Append(edge.EdgeAlias)
+        //            .Append(" in ")
+        //            .Append(node.NodeAlias)
+        //            .Append(IsTraversalThroughPhysicalReverseEdge(edge) ? "._reverse_edge" : "_edge");
+
+        //        // TODO: Use the same offset in _edge and _reverse_edge
+        //        selectStrBuilder.Append(ConstructMetaFieldSelectClauseOfEdge(edge));
+        //        properties.Add(edge.EdgeAlias + "_source");
+        //        projectedColumnsType.Add(ColumnGraphType.EdgeSource);
+        //        properties.Add(edge.EdgeAlias + "_sink");
+        //        projectedColumnsType.Add(ColumnGraphType.EdgeSink);
+        //        properties.Add(edge.EdgeAlias + "_other");
+        //        projectedColumnsType.Add(ColumnGraphType.Value);
+        //        properties.Add(edge.EdgeAlias + "_ID");
+        //        projectedColumnsType.Add(ColumnGraphType.EdgeOffset);
+        //        properties.Add(edge.EdgeAlias + "_physical_ID");
+        //        projectedColumnsType.Add(ColumnGraphType.EdgeOffset);
+        //        // This adjType is used for notifying GetVertice that the following edgeField should be retrieved from _edge or _reverse_edge
+        //        properties.Add("adjType");
+        //        projectedColumnsType.Add(ColumnGraphType.Value);
+        //        // This takes care of the edge.* property
+        //        properties.Add(edge.EdgeAlias);
+        //        projectedColumnsType.Add(ColumnGraphType.EdgeObject);
+
+        //        for (int i = GraphViewReservedProperties.ReservedEdgeProperties.Count; i < edge.Properties.Count; i++)
+        //        {
+        //            string property = edge.Properties[i];
+        //            //var selectName = edge.EdgeAlias + "." + property;
+        //            //var selectAlias = edge.EdgeAlias + "_" + property;
+
+        //            projectedColumnsType.Add(ColumnGraphType.Value);
+                        
+        //            //selectStrBuilder.Append(", ").Append(string.Format("{0} AS {1}", selectName, selectAlias));
+        //            properties.Add(property);
+        //        }   
+
+        //        foreach (WBooleanExpression predicate in edge.Predicates)
+        //            searchCondition = WBooleanBinaryExpression.Conjunction(searchCondition, predicate);
+        //    }
+
+        //    BooleanWValueExpressionVisitor booleanWValueExpressionVisitor = new BooleanWValueExpressionVisitor();
+        //    booleanWValueExpressionVisitor.Invoke(searchCondition);
+
+        //    JsonQuery jsonQuery = new JsonQuery
+        //    {
+        //        Alias = nodeAlias,
+        //        JoinClause = joinStrBuilder.ToString(),
+        //        SelectClause = selectStrBuilder.ToString(),
+        //        WhereSearchCondition = searchCondition != null ? searchCondition.ToString() : null,
+        //        Properties = properties,
+        //        ProjectedColumnsType = projectedColumnsType,
+        //    };
+        //    node.AttachedJsonQuery = jsonQuery;
+        //}
 
         internal static void ConstructJsonQueryOnNode(MatchNode node, List<MatchEdge> backwardMatchingEdges = null)
         {
@@ -233,90 +338,64 @@ namespace GraphView
             StringBuilder joinStrBuilder = new StringBuilder();
             List<string> properties = new List<string> { nodeAlias };
             List<ColumnGraphType> projectedColumnsType = new List<ColumnGraphType>();
-           
+
             WBooleanExpression searchCondition = null;
+            
+            //
+            // SELECT N_0 FROM Node N_0
+            //
+            selectStrBuilder.Append(nodeAlias);
 
             properties.Add("id");
             projectedColumnsType.Add(ColumnGraphType.VertexId);
-            //selectStrBuilder.Append(nodeAlias + ".id");
+
             properties.Add("label");
             projectedColumnsType.Add(ColumnGraphType.Value);
-            //selectStrBuilder.Append(nodeAlias + ".label");
+
             properties.Add("_edge");
             projectedColumnsType.Add(ColumnGraphType.OutAdjacencyList);
-            //selectStrBuilder.Append(", ").Append(nodeAlias + "._edge");
+
             properties.Add("_reverse_edge");
             projectedColumnsType.Add(ColumnGraphType.InAdjacencyList);
-            //selectStrBuilder.Append(", ").Append(nodeAlias + "._reverse_edge");
-            // This takes care of the node.* property
+
             properties.Add("*");
             projectedColumnsType.Add(ColumnGraphType.VertexObject);
-            //selectStrBuilder.Append(", ").Append(nodeAlias);
 
-            selectStrBuilder.Append(nodeAlias);
-
-            for (int i = GraphViewReservedProperties.ReservedNodeProperties.Count; i < node.Properties.Count; i++)
+            for (int propertyIndex = GraphViewReservedProperties.ReservedNodeProperties.Count; 
+                propertyIndex < node.Properties.Count;
+                propertyIndex++)
             {
-                string selectName = nodeAlias + "." + node.Properties[i];
-                properties.Add(node.Properties[i]);
+                properties.Add(node.Properties[propertyIndex]);
                 projectedColumnsType.Add(ColumnGraphType.Value);
-                //selectStrBuilder.Append(", ").Append(selectName);
             }
-                
+
             foreach (WBooleanExpression predicate in node.Predicates)
                 searchCondition = WBooleanBinaryExpression.Conjunction(searchCondition, predicate);
-
-            if (backwardMatchingEdges == null)
-                backwardMatchingEdges = new List<MatchEdge>();
 
             //
             // Currently, no backwardMatchingEdges will be produced
             //
-            foreach (MatchEdge edge in backwardMatchingEdges)
-            {
-                joinStrBuilder.Append(" Join ")
-                    .Append(edge.EdgeAlias)
-                    .Append(" in ")
-                    .Append(node.NodeAlias)
-                    .Append(IsTraversalThroughPhysicalReverseEdge(edge) ? "._reverse_edge" : "_edge");
+            //if (backwardMatchingEdges == null)
+            //    backwardMatchingEdges = new List<MatchEdge>();
 
-                // TODO: Use the same offset in _edge and _reverse_edge
-                selectStrBuilder.Append(ConstructMetaFieldSelectClauseOfEdge(edge));
-                properties.Add(edge.EdgeAlias + "_source");
-                projectedColumnsType.Add(ColumnGraphType.EdgeSource);
-                properties.Add(edge.EdgeAlias + "_sink");
-                projectedColumnsType.Add(ColumnGraphType.EdgeSink);
-                properties.Add(edge.EdgeAlias + "_other");
-                projectedColumnsType.Add(ColumnGraphType.Value);
-                properties.Add(edge.EdgeAlias + "_ID");
-                projectedColumnsType.Add(ColumnGraphType.EdgeOffset);
-                properties.Add(edge.EdgeAlias + "_physical_ID");
-                projectedColumnsType.Add(ColumnGraphType.EdgeOffset);
-                // This adjType is used for notifying GetVertice that the following edgeField should be retrieved from _edge or _reverse_edge
-                properties.Add("adjType");
-                projectedColumnsType.Add(ColumnGraphType.Value);
-                // This takes care of the edge.* property
-                properties.Add(edge.EdgeAlias);
-                projectedColumnsType.Add(ColumnGraphType.EdgeObject);
+            //foreach (MatchEdge edge in backwardMatchingEdges)
+            //{
+            //}
 
-                for (int i = GraphViewReservedProperties.ReservedEdgeProperties.Count; i < edge.Properties.Count; i++)
-                {
-                    string property = edge.Properties[i];
-                    //var selectName = edge.EdgeAlias + "." + property;
-                    //var selectAlias = edge.EdgeAlias + "_" + property;
-
-                    projectedColumnsType.Add(ColumnGraphType.Value);
-                        
-                    //selectStrBuilder.Append(", ").Append(string.Format("{0} AS {1}", selectName, selectAlias));
-                    properties.Add(property);
-                }   
-
-                foreach (WBooleanExpression predicate in edge.Predicates)
-                    searchCondition = WBooleanBinaryExpression.Conjunction(searchCondition, predicate);
-            }
 
             BooleanWValueExpressionVisitor booleanWValueExpressionVisitor = new BooleanWValueExpressionVisitor();
             booleanWValueExpressionVisitor.Invoke(searchCondition);
+
+            NormalizeWColumnReferenceExpressionVisitor normalizeColumnReferenceExpressionVisitor =
+                new NormalizeWColumnReferenceExpressionVisitor();
+            Dictionary<string, string> referencedProperties =
+                normalizeColumnReferenceExpressionVisitor.Invoke(searchCondition);
+
+            foreach (KeyValuePair<string, string> referencedProperty in referencedProperties)
+            {
+                joinStrBuilder.AppendFormat(" JOIN {0} IN {1}['{2}'] ", referencedProperty.Key,
+                    nodeAlias, referencedProperty.Value);
+            }
 
             JsonQuery jsonQuery = new JsonQuery
             {
@@ -405,8 +484,6 @@ namespace GraphView
                                 SrcNode.ReverseCheckList = new Dictionary<int, int>();
                                 SrcNode.HeaderLength = 0;
                                 SrcNode.Properties = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
-                                SrcNode.Low = SrcNodeTableReference.Low;
-                                SrcNode.High = SrcNodeTableReference.High;
                             }
 
                             // Consturct the edge of a path in MatchClause.Paths
@@ -535,8 +612,6 @@ namespace GraphView
                             DestNode.ReverseCheckList = new Dictionary<int, int>();
                             DestNode.HeaderLength = 0;
                             DestNode.Properties = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
-                            DestNode.Low = DestNodeTableReference.Low;
-                            DestNode.High = DestNodeTableReference.High;
                         }
                         if (EdgeToSrcNode != null)
                         {
@@ -587,8 +662,6 @@ namespace GraphView
                     patternNode.External = false;
                     patternNode.Predicates = new List<WBooleanExpression>();
                     patternNode.Properties = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
-                    patternNode.Low = patternNodeTableReference.Low;
-                    patternNode.High = patternNodeTableReference.High;
                 }
 
                 if (!subGraphMap.ContainsKey(root))
@@ -888,14 +961,6 @@ namespace GraphView
             }
         }
 
-        private void CheckAndAppendRangeFilter(QueryCompilationContext context, List<GraphViewExecutionOperator> operatorChain,
-            int low, int high)
-        {
-            if (low == Int32.MinValue && high == Int32.MaxValue) return;
-            operatorChain.Add(new RangeOperator(context.CurrentExecutionOperator, low, high));
-            context.CurrentExecutionOperator = operatorChain.Last();
-        }
-
         private GraphViewExecutionOperator ConstructOperator2(GraphViewConnection connection, MatchGraph graphPattern,
             QueryCompilationContext context, List<WTableReferenceWithAlias> nonVertexTableReferences,
             List<Tuple<WBooleanExpression, HashSet<string>>> predicatesAccessedTableReferences)
@@ -947,8 +1012,6 @@ namespace GraphView
                         UpdateNodeLayout(sourceNode.NodeAlias, sourceNode.Properties, context);
                         processedNodes.Add(sourceNode);
                         tableReferences.Add(sourceNode.NodeAlias, TableGraphType.Vertex);
-
-                        CheckAndAppendRangeFilter(context, operatorChain, sourceNode.Low, sourceNode.High);
 
                         CheckRemainingPredicatesAndAppendFilterOp(context, connection,
                             new HashSet<string>(tableReferences.Keys), predicatesAccessedTableReferences,
@@ -1002,9 +1065,7 @@ namespace GraphView
                             // Cross apply dangling edges
                             CrossApplyEdges(connection, context, operatorChain, sinkNode.DanglingEdges,
                                 predicatesAccessedTableReferences);
-
-                            CheckAndAppendRangeFilter(context, operatorChain, sinkNode.Low, sinkNode.High);
-
+                            
                             CheckRemainingPredicatesAndAppendFilterOp(context, connection,
                                 new HashSet<string>(tableReferences.Keys), predicatesAccessedTableReferences,
                                 operatorChain);
@@ -1072,8 +1133,6 @@ namespace GraphView
                 {
 
                 }
-
-                CheckAndAppendRangeFilter(context, operatorChain, tableReference.Low, tableReference.High);
 
                 CheckRemainingPredicatesAndAppendFilterOp(context, connection,
                     new HashSet<string>(tableReferences.Keys), predicatesAccessedTableReferences,
@@ -1281,7 +1340,7 @@ namespace GraphView
                 {
                     var alias = expr.ColumnName;
                     // TODO: Change to Addfield with correct ColumnGraphType
-                    context.AddField("", alias ?? "_value", ColumnGraphType.Value);
+                    context.AddField("", alias ?? GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
                 }
 
                 operatorChain.Add(projectAggregationOp);
@@ -1403,30 +1462,6 @@ namespace GraphView
             context.TemporaryTableCollection[_variable.Name] = new Tuple<TemporaryTableHeader, GraphViewExecutionOperator>(tmpTableHeader, subqueryOp);
 
             return subqueryOp;
-        }
-    }
-
-    partial class WOrderByClause
-    {
-        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
-        {
-
-            var orderByElements = new List<Tuple<int, SortOrder>>();
-            if (OrderByElements != null)
-            {
-                foreach (var element in OrderByElements)
-                {
-                    var expr = element.ScalarExpr as WColumnReferenceExpression;
-                    if (expr == null)
-                        throw new SyntaxErrorException("The order by elements can only be WColumnReferenceExpression.");
-
-                    orderByElements.Add(new Tuple<int, SortOrder>(context.LocateColumnReference(expr), element.SortOrder));
-                }
-            }
-
-            var orderByOp = new OrderbyOperator2(context.CurrentExecutionOperator, orderByElements);
-            context.CurrentExecutionOperator = orderByOp;
-            return orderByOp;
         }
     }
 
@@ -1722,7 +1757,9 @@ namespace GraphView
             var sinkParameter = Parameters[0] as WColumnReferenceExpression;
             var sinkIndex = context.LocateColumnReference(sinkParameter);
             var nodeAlias = Alias.Value;
-            var isSendQueryRequired = !(Parameters.Count == 2 && (Parameters[1] as WValueExpression).Value.Equals("id"));
+            //var isSendQueryRequired = !(Parameters.Count == 2 && (Parameters[1] as WValueExpression).Value.Equals("id"));
+            var isSendQueryRequired = true;
+
             var matchNode = new MatchNode
             {
                 AttachedJsonQuery = null,
@@ -1779,7 +1816,9 @@ namespace GraphView
                 context.LocateColumnReference(secondSinkParameter)
             };
             var nodeAlias = Alias.Value;
-            var isSendQueryRequired = !(Parameters.Count == 3 && (Parameters[2] as WValueExpression).Value.Equals("id"));
+            //var isSendQueryRequired = !(Parameters.Count == 3 && (Parameters[2] as WValueExpression).Value.Equals("id"));
+            var isSendQueryRequired = true;
+
             var matchNode = new MatchNode
             {
                 AttachedJsonQuery = null,
@@ -1954,27 +1993,75 @@ namespace GraphView
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            List<int> valuesIdxList = new List<int>();
-            int allValuesIndex = -1;
+            List<int> propertiesIndex = new List<int>();
 
-            if (Parameters.Count == 1 &&
-                (Parameters[0] as WColumnReferenceExpression).ColumnName.Equals("*", StringComparison.OrdinalIgnoreCase))
+            foreach (WScalarExpression expression in Parameters)
             {
-                allValuesIndex = context.LocateColumnReference(Parameters[0] as WColumnReferenceExpression);
-            }
-            foreach (var expression in Parameters)
-            {
-                var columnReference = expression as WColumnReferenceExpression;
-                if (columnReference == null)
-                    throw new SyntaxErrorException("Parameters of Values function can only be WColumnReference.");
-                valuesIdxList.Add(context.LocateColumnReference(columnReference));
+                WColumnReferenceExpression targetParameter = expression as WColumnReferenceExpression;
+                if (targetParameter != null)
+                {
+                    propertiesIndex.Add(context.LocateColumnReference(targetParameter));
+                    continue;
+                }
+
+                throw new QueryCompilationException(
+                    "Parameters of Properties table can only be WColumnReferenceExpression.");
             }
 
-            GraphViewExecutionOperator valuesOperator = new ValuesOperator(context.CurrentExecutionOperator, valuesIdxList, allValuesIndex);
-            context.CurrentExecutionOperator = valuesOperator;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            GraphViewExecutionOperator valuesOp = new ValuesOperator2(context.CurrentExecutionOperator, propertiesIndex);
+            context.CurrentExecutionOperator = valuesOp;
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+
+            return valuesOp;
+        }
+    }
+
+    partial class WAllPropertiesTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression inputParameter = Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(inputParameter != null, "inputParameter != null");
+
+            int inputTargetIndex = context.LocateColumnReference(inputParameter);
+
+            List<string> populatedMetaproperties = new List<string>();
+            for (int metaPropertiesIndex = 1; metaPropertiesIndex < Parameters.Count; metaPropertiesIndex++)
+            {
+                WValueExpression metaPropertyExpression = Parameters[metaPropertiesIndex] as WValueExpression;
+                Debug.Assert(metaPropertyExpression != null, "metaPropertyExpression != null");
+                
+                populatedMetaproperties.Add(metaPropertyExpression.Value);
+            }
+
             
-            return valuesOperator;
+            AllPropertiesOperator allPropertiesOp = new AllPropertiesOperator(context.CurrentExecutionOperator,
+                inputTargetIndex, populatedMetaproperties);
+            context.CurrentExecutionOperator = allPropertiesOp;
+
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+            foreach (string metapropertyName in populatedMetaproperties) {
+                context.AddField(Alias.Value, metapropertyName, ColumnGraphType.Value);
+            }
+
+            return allPropertiesOp;
+        }
+    }
+
+    partial class WAllValuesTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression inputParameter = Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(inputParameter != null, "inputParameter != null");
+
+            int inputTargetIndex = context.LocateColumnReference(inputParameter);
+
+            AllValuesOperator allValuesOp = new AllValuesOperator(context.CurrentExecutionOperator, inputTargetIndex);
+            context.CurrentExecutionOperator = allValuesOp;
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+
+            return allValuesOp;
         }
     }
 
@@ -1982,36 +2069,44 @@ namespace GraphView
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            List<Tuple<string, int>> propertiesList = new List<Tuple<string, int>>();
-            int allPropertyIndex = -1;
+            List<int> propertiesIndex = new List<int>();
+            List<string> populateMetaproperties = new List<string>();
 
-            if (Parameters.Count == 1 &&
-                (Parameters[0] as WColumnReferenceExpression).ColumnName.Equals("*", StringComparison.OrdinalIgnoreCase))
+            foreach (WScalarExpression expression in Parameters)
             {
-                allPropertyIndex = context.LocateColumnReference(Parameters[0] as WColumnReferenceExpression);
-            }
-            else
-            {
-                foreach (var expression in Parameters)
+                WColumnReferenceExpression targetParameter = expression as WColumnReferenceExpression;
+                if (targetParameter != null)
                 {
-                    var columnReference = expression as WColumnReferenceExpression;
-                    if (columnReference == null)
-                        throw new SyntaxErrorException("Parameters of Properties function can only be WColumnReference.");
-
-                    propertiesList.Add(new Tuple<string, int>(columnReference.ColumnName,
-                        context.LocateColumnReference(columnReference)));
+                    propertiesIndex.Add(context.LocateColumnReference(targetParameter));
+                    continue;
                 }
+
+                WValueExpression populateMetapropertyNameParameter = expression as WValueExpression;
+                if (populateMetapropertyNameParameter != null)
+                {
+                    populateMetaproperties.Add(populateMetapropertyNameParameter.Value);
+                    continue;
+                }
+
+                throw new QueryCompilationException(
+                    "Parameters of Properties table can only be WColumnReferenceExpression or WValueExpression.");
+
             }
 
-            GraphViewExecutionOperator propertiesOp = new PropertiesOperator(context.CurrentExecutionOperator, propertiesList, allPropertyIndex);
+            GraphViewExecutionOperator propertiesOp = new PropertiesOperator2(context.CurrentExecutionOperator,
+                propertiesIndex, populateMetaproperties);
             context.CurrentExecutionOperator = propertiesOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
 
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+            foreach (string metapropertyName in populateMetaproperties) {
+                context.AddField(Alias.Value, metapropertyName, ColumnGraphType.Value);
+            }
+        
             return propertiesOp;
         }
     }
 
-    partial class WDedupTableReference
+    partial class WDedupGlobalTableReference
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
@@ -2025,22 +2120,34 @@ namespace GraphView
         }
     }
 
+    partial class WDedupLocalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            DeduplicateLocalOperator dedupLocalOp = new DeduplicateLocalOperator(context.CurrentExecutionOperator,
+                Parameters[0].CompileToFunction(context, dbConnection));
+            context.CurrentExecutionOperator = dedupLocalOp;
+
+            return dedupLocalOp;
+        }
+    }
+
     partial class WConstantReference
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            List<string> constantValues = new List<string>();
-            foreach (var parameter in Parameters)
+            List<ScalarFunction> constantValues = new List<ScalarFunction>();
+
+            foreach (WScalarExpression expression in this.Parameters)
             {
-                var constantParameter = parameter as WValueExpression;
-                if (constantParameter == null)
-                    throw new SyntaxErrorException("The parameter of Constant function can only be a WValueExpression");
-                constantValues.Add(constantParameter.Value);
+                WValueExpression constantValue = expression as WValueExpression;
+                Debug.Assert(constantValue != null, "constantValue != null");
+                constantValues.Add(constantValue.CompileToFunction(context, dbConnection));
             }
 
-            var constantOp = new ConstantOperator(context.CurrentExecutionOperator, constantValues);
+            ConstantOperator constantOp = new ConstantOperator(context.CurrentExecutionOperator, constantValues, this.IsList);
             context.CurrentExecutionOperator = constantOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return constantOp;
         }
@@ -2068,7 +2175,7 @@ namespace GraphView
             }
 
             context.CurrentExecutionOperator = projectByOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             for (var i = 0; i < Parameters.Count; i += 2)
             {
@@ -2101,6 +2208,10 @@ namespace GraphView
         {
             WSelectQueryBlock contextSelect, repeatSelect;
             Split(out contextSelect, out repeatSelect);
+
+            //if (HasAggregateFunctionInTheRepeatSelectQuery(repeatSelect)) {
+            //    throw new QueryCompilationException("The parent of an aggregate function cannot be a repeat operator.");
+            //}
 
             List<int> inputIndexes = new List<int>();
             QueryCompilationContext rTableContext = new QueryCompilationContext(context);
@@ -2181,25 +2292,26 @@ namespace GraphView
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            var unfoldColumns = new List<string>();
-            for (var i = 1; i < Parameters.Count; i++)
+            List<string> unfoldColumns = new List<string>();
+            for (int i = 1; i < this.Parameters.Count; i++)
             {
-                var unfoldColumn = Parameters[i] as WValueExpression;
+                WValueExpression unfoldColumn = this.Parameters[i] as WValueExpression;
+                Debug.Assert(unfoldColumn != null, "unfoldColumn != null");
                 unfoldColumns.Add(unfoldColumn.Value);
             }
 
-            var unfoldOp = new UnfoldOperator(context.CurrentExecutionOperator,
-                Parameters[0].CompileToFunction(context, dbConnection), unfoldColumns);
+            UnfoldOperator unfoldOp = new UnfoldOperator(
+                context.CurrentExecutionOperator,
+                Parameters[0].CompileToFunction(context, dbConnection), 
+                unfoldColumns);
             context.CurrentExecutionOperator = unfoldOp;
 
-            for (var i = 1; i < Parameters.Count; i++)
+            for (int i = 1; i < this.Parameters.Count; i++)
             {
-                var columnName = (Parameters[i] as WValueExpression).Value;
+                string columnName = (Parameters[i] as WValueExpression).Value;
                 // TODO: Change to correct ColumnGraphType
                 context.AddField(Alias.Value, columnName, ColumnGraphType.Value);
             }
-
-            //context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
 
             return unfoldOp;
         }
@@ -2223,7 +2335,52 @@ namespace GraphView
 
             var pathOp = new PathOperator(context.CurrentExecutionOperator, pathFieldList);
             context.CurrentExecutionOperator = pathOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+
+            return pathOp;
+        }
+    }
+
+    partial class WPath2TableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbcConnection)
+        {
+            //
+            // If the boolean value is true, then it's a subPath to be unfolded
+            //
+            List<Tuple<ScalarFunction, bool>> pathStepList = new List<Tuple<ScalarFunction, bool>>();
+            List<ScalarFunction> byFuncList = new List<ScalarFunction>();
+            QueryCompilationContext byInitContext = new QueryCompilationContext(context);
+            byInitContext.ClearField();
+            byInitContext.AddField(GremlinKeyword.Compose1TableDefaultName, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
+
+            foreach (WScalarExpression expression in Parameters)
+            {
+                WFunctionCall basicStep = expression as WFunctionCall;
+                WColumnReferenceExpression subPath = expression as WColumnReferenceExpression;
+                WScalarSubquery byFunc = expression as WScalarSubquery;
+
+                if (basicStep != null)
+                {
+                    pathStepList.Add(new Tuple<ScalarFunction, bool>(basicStep.CompileToFunction(context, dbcConnection), false));
+                }
+                else if (subPath != null)
+                {
+                    pathStepList.Add(new Tuple<ScalarFunction, bool>(subPath.CompileToFunction(context, dbcConnection), true));
+                }
+                else if (byFunc != null)
+                {
+                    byFuncList.Add(byFunc.CompileToFunction(byInitContext, dbcConnection));
+                }
+                else {
+                    throw new QueryCompilationException(
+                        "The parameter of WPathTableReference can only be a WFunctionCall/WColumnReferenceExpression/WScalarSubquery.");
+                }
+            }
+
+            PathOperator2 pathOp = new PathOperator2(context.CurrentExecutionOperator, pathStepList, byFuncList);
+            context.CurrentExecutionOperator = pathOp;
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return pathOp;
         }
@@ -2252,7 +2409,7 @@ namespace GraphView
 
             // In g.Inject() case, the inject() step creates a new column in RawRecord
             if (context.RawRecordLayout.Count == 0)
-                context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+                context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return injectOp;
         }
@@ -2275,16 +2432,18 @@ namespace GraphView
                 sideEffectState = new CollectionFunction();
                 context.SideEffectStates.Add(storedName, sideEffectState);
             }
-            else if (!(sideEffectState is CollectionFunction))
-            {
-                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+            else if (!(sideEffectState is CollectionFunction)) {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and an aggregate(string) step!");
+            }
+            else {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a tree(string) step and an aggregate(string) step!");
             }
 
             AggregateOperator aggregateOp = new AggregateOperator(context.CurrentExecutionOperator, getAggregateObjectFunction,
                 (CollectionFunction)sideEffectState);
             context.CurrentExecutionOperator = aggregateOp;
             // TODO: Change to correct ColumnGraphType
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return aggregateOp;
         }
@@ -2307,16 +2466,18 @@ namespace GraphView
                 sideEffectState = new CollectionFunction();
                 context.SideEffectStates.Add(storedName, sideEffectState);
             }
-            else if (!(sideEffectState is CollectionFunction))
-            {
+            else if (sideEffectState is GroupFunction) {
                 throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+            }
+            else {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a tree(string) step and a store(string) step!");
             }
 
             StoreOperator storeOp = new StoreOperator(context.CurrentExecutionOperator, getStoreObjectFunction,
                 (CollectionFunction) sideEffectState);
             context.CurrentExecutionOperator = storeOp;
             // TODO: Change to correct ColumnGraphType
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
 
             return storeOp;
@@ -2409,7 +2570,7 @@ namespace GraphView
             PropertyKeyOperator keyOp = new PropertyKeyOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(propertyField));
             context.CurrentExecutionOperator = keyOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return keyOp;
         }
@@ -2424,9 +2585,43 @@ namespace GraphView
             PropertyValueOperator valueOp = new PropertyValueOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(propertyField));
             context.CurrentExecutionOperator = valueOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return valueOp;
+        }
+    }
+
+    partial class WTreeTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WValueExpression sideEffectKey = Parameters[0] as WValueExpression;
+            WColumnReferenceExpression pathColumn = Parameters[1] as WColumnReferenceExpression;
+            Debug.Assert(sideEffectKey != null, "sideEffectKey != null");
+            Debug.Assert(pathColumn != null, "pathColumn != null");
+            int pathIndex = context.LocateColumnReference(pathColumn);
+
+            IAggregateFunction sideEffectState;
+            if (!context.SideEffectStates.TryGetValue(sideEffectKey.Value, out sideEffectState))
+            {
+                sideEffectState = new TreeFunction();
+                context.SideEffectStates.Add(sideEffectKey.Value, sideEffectState);
+            }
+            else if (sideEffectState is GroupFunction) {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a tree(string) step!");
+            }
+            else {
+                throw new QueryCompilationException("It's illegal to use the same sideEffect key of a store/aggregate(string) step and a tree(string) step!");
+            }
+
+            TreeSideEffectOperator treeSideEffectOp = new TreeSideEffectOperator(
+                context.CurrentExecutionOperator,
+                (TreeFunction)sideEffectState,
+                pathIndex);
+
+            context.CurrentExecutionOperator = treeSideEffectOp;
+
+            return treeSideEffectOp;
         }
     }
 
@@ -2434,30 +2629,16 @@ namespace GraphView
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
-            WScalarSubquery groupKeySubQuery = Parameters[1] as WScalarSubquery;
-            WColumnReferenceExpression groupKeyColumnReference = Parameters[1] as WColumnReferenceExpression;
+            WScalarExpression groupKeySubQuery = Parameters[1];
             WScalarSubquery aggregateSubQuery = Parameters[2] as WScalarSubquery;
-            WColumnReferenceExpression elementPropertyProjection = Parameters[2] as WColumnReferenceExpression;
+            Debug.Assert(aggregateSubQuery != null, "aggregateSubQuery != null");
 
-            if (groupKeySubQuery == null && groupKeyColumnReference == null)
-                throw new SyntaxErrorException("The group key parameter of group table can only be WScalarSubquery or WColumnReferenceExpression.");
-            if (aggregateSubQuery == null && elementPropertyProjection == null)
-                throw new SyntaxErrorException("The group value parameter of group table can only be WScalarSubquery or WColumnReferenceExpression.");
-
-            int groupKeyFieldIndex = groupKeyColumnReference == null
-                                     ? -1
-                                     : context.LocateColumnReference(groupKeyColumnReference);
-
-            int elementPropertyProjectionIndex = elementPropertyProjection == null 
-                                                 ? -1 
-                                                 : context.LocateColumnReference(elementPropertyProjection);
-
-            ScalarFunction groupKeyFunction = groupKeySubQuery?.CompileToFunction(context, dbConnection);
+            ScalarFunction groupKeyFunction = groupKeySubQuery.CompileToFunction(context, dbConnection);
 
             QueryCompilationContext subcontext = new QueryCompilationContext(context);
             ConstantSourceOperator tempSourceOp = new ConstantSourceOperator();
             ContainerOperator aggregatedSourceOp = new ContainerOperator(tempSourceOp);
-            GraphViewExecutionOperator aggregateOp = aggregateSubQuery?.SubQueryExpr.Compile(subcontext, dbConnection);
+            GraphViewExecutionOperator aggregateOp = aggregateSubQuery.SubQueryExpr.Compile(subcontext, dbConnection);
             subcontext.OuterContextOp.SourceEnumerator = aggregatedSourceOp.GetEnumerator();
 
             WValueExpression groupParameter = Parameters[0] as WValueExpression;
@@ -2465,9 +2646,9 @@ namespace GraphView
             {
                 GroupOperator groupOp = new GroupOperator(
                     context.CurrentExecutionOperator, 
-                    groupKeyFunction, groupKeyFieldIndex,
+                    groupKeyFunction,
                     tempSourceOp, aggregatedSourceOp, aggregateOp, 
-                    elementPropertyProjectionIndex, 
+                    this.IsProjectingACollection, 
                     context.CarryOn ? context.RawRecordLayout.Count : -1);
 
                 context.CurrentExecutionOperator = groupOp;
@@ -2475,7 +2656,7 @@ namespace GraphView
                 if (!context.CarryOn)
                     context.ClearField();
                 // Change to correct ColumnGraphType
-                context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+                context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
                 return groupOp;
             }
@@ -2485,20 +2666,23 @@ namespace GraphView
                 if (!context.SideEffectStates.TryGetValue(groupParameter.Value, out sideEffectState))
                 {
                     sideEffectState = new GroupFunction(tempSourceOp, aggregatedSourceOp, aggregateOp,
-                        elementPropertyProjectionIndex);
+                        this.IsProjectingACollection);
                     context.SideEffectStates.Add(groupParameter.Value, sideEffectState);
                 }
                 else if (sideEffectState is GroupFunction) {
                     throw new QueryCompilationException("Multi group with same sideEffect key is an undefined behavior in Gremlin and hence not supported.");
                 }
+                else if (sideEffectState is TreeFunction) {
+                    throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a tree(string) step!");
+                }
                 else {
-                    throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store(string) step!");
+                    throw new QueryCompilationException("It's illegal to use the same sideEffect key of a group(string) step and a store/aggregate(string) step!");
                 }
 
                 GroupSideEffectOperator groupSideEffectOp = new GroupSideEffectOperator(
                     context.CurrentExecutionOperator,
                     (GroupFunction)sideEffectState,
-                    groupKeyFunction, groupKeyFieldIndex);
+                    groupKeyFunction);
 
                 context.CurrentExecutionOperator = groupSideEffectOp;
 
@@ -2581,7 +2765,7 @@ namespace GraphView
             SumLocalOperator sumLocalOp = new SumLocalOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(targetField));
             context.CurrentExecutionOperator = sumLocalOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return sumLocalOp;
         }
@@ -2596,7 +2780,7 @@ namespace GraphView
             MaxLocalOperator maxLocalOp = new MaxLocalOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(targetField));
             context.CurrentExecutionOperator = maxLocalOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return maxLocalOp;
         }
@@ -2611,7 +2795,7 @@ namespace GraphView
             MinLocalOperator minLocalOp = new MinLocalOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(targetField));
             context.CurrentExecutionOperator = minLocalOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return minLocalOp;
         }
@@ -2626,9 +2810,221 @@ namespace GraphView
             MeanLocalOperator meanLocalOp = new MeanLocalOperator(context.CurrentExecutionOperator,
                 context.LocateColumnReference(targetField));
             context.CurrentExecutionOperator = meanLocalOp;
-            context.AddField(Alias.Value, "_value", ColumnGraphType.Value);
+            context.AddField(Alias.Value, GremlinKeyword.TableDefaultColumnName, ColumnGraphType.Value);
 
             return meanLocalOp;
+        }
+    }
+
+    partial class WCoinTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            GraphViewExecutionOperator inputOp = context.CurrentExecutionOperator;
+
+            double probability = double.Parse(((WValueExpression)this.Parameters[0]).Value);
+
+            GraphViewExecutionOperator coinOp = new CoinOperator(inputOp, probability);
+            context.CurrentExecutionOperator = coinOp;
+            return coinOp;
+        }
+    }
+
+    partial class WSampleTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            GraphViewExecutionOperator inputOp = context.CurrentExecutionOperator;
+            long amountToSample = long.Parse(((WValueExpression)this.Parameters[0]).Value);
+            ScalarFunction byFunction = this.Parameters[1]?.CompileToFunction(context, dbConnection);  // Can be null if no "by" step
+
+            GraphViewExecutionOperator sampleOp = new SampleOperator(inputOp, amountToSample, byFunction);
+            context.CurrentExecutionOperator = sampleOp;
+            return sampleOp;
+        }
+    }
+
+    partial class WOrderGlobalTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            List<Tuple<ScalarFunction, IComparer>> orderByElements = new List<Tuple<ScalarFunction, IComparer>>();
+
+            foreach (Tuple<WScalarExpression, IComparer> tuple in OrderParameters)
+            {
+                WScalarExpression byParameter = tuple.Item1;
+
+                ScalarFunction byFunction = byParameter.CompileToFunction(context, dbConnection);
+                IComparer comparer = tuple.Item2;
+
+                orderByElements.Add(new Tuple<ScalarFunction, IComparer>(byFunction, comparer));
+            }
+
+            OrderOperator orderOp = new OrderOperator(context.CurrentExecutionOperator, orderByElements);
+            context.CurrentExecutionOperator = orderOp;
+
+            return orderOp;
+        }
+    }
+
+    //partial class WOrderLocalTableReference
+    //{
+    //    internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+    //    {
+    //        List<Tuple<ScalarFunction, IComparer>> orderByElements = new List<Tuple<ScalarFunction, IComparer>>();
+
+    //        foreach (Tuple<WScalarExpression, IComparer> tuple in OrderParameters)
+    //        {
+    //            WScalarExpression byParameter = tuple.Item1;
+    //            Debug.Assert(byParameter is WColumnReferenceExpression || byParameter is WScalarSubquery,
+    //                "byParameter is WColumnReferenceExpression || byParameter is WScalarSubquery");
+
+    //            ScalarFunction byFunction = byParameter.CompileToFunction(context, dbConnection);
+    //            IComparer comparer = tuple.Item2;
+
+    //            orderByElements.Add(new Tuple<ScalarFunction, IComparer>(byFunction, comparer));
+    //        }
+
+    //        OrderLocalOperator orderLocalOp = new OrderLocalOperator(context.CurrentExecutionOperator, orderByElements);
+    //        context.CurrentExecutionOperator = orderLocalOp;
+
+    //        return orderLocalOp;
+    //    }
+    //}
+
+    partial class WRangeTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            //
+            // The first parameter is used only when isLocal = true
+            //
+            WColumnReferenceExpression inputCollection = Parameters[0] as WColumnReferenceExpression;
+            int lowEnd = int.Parse((Parameters[1] as WValueExpression).Value);
+            int highEnd = int.Parse((Parameters[2] as WValueExpression).Value);
+            int localFlag = int.Parse((Parameters[3] as WValueExpression).Value);
+            int tailFlag = int.Parse((Parameters[4] as WValueExpression).Value);
+            bool isLocal = localFlag > 0;
+            bool isTail = tailFlag > 0;
+
+            //
+            // Compilation of Tail op, which returns lastN elements
+            //
+            if (isTail)
+            {
+                int lastN = highEnd < 0 ? 1 : highEnd;
+
+                if (isLocal)
+                {
+                    TailLocalOperator tailLocalOp = new TailLocalOperator(context.CurrentExecutionOperator,
+                        context.LocateColumnReference(inputCollection), lastN);
+                    context.CurrentExecutionOperator = tailLocalOp;
+                    return tailLocalOp;
+                }
+                else
+                {
+                    TailOperator tailOp = new TailOperator(context.CurrentExecutionOperator, lastN);
+                    context.CurrentExecutionOperator = tailOp;
+
+                    return tailOp;
+                }
+            }
+            //
+            // Compilation of Range op, which return elements from [startIndex, startIndex + count)
+            // If count == -1, return all elements starting from startIndex 
+            //
+            else
+            {
+                if ((lowEnd > highEnd && highEnd >= 0) || (lowEnd >= 0 && highEnd < -1)) {
+                    throw new QueryCompilationException(string.Format("Not a legal range: [{0}, {1}]", lowEnd, highEnd));
+                }
+
+                int startIndex = lowEnd < 0 ? 0 : lowEnd;
+                int count;
+                if (highEnd == -1) {
+                    count = -1;
+                }
+                else if ((count = highEnd - startIndex) < 0) {
+                    count = 0;
+                }
+
+                if (isLocal)
+                {
+                    RangeLocalOperator rangeLocalOp = new RangeLocalOperator(context.CurrentExecutionOperator,
+                        context.LocateColumnReference(inputCollection), startIndex, count);
+                    context.CurrentExecutionOperator = rangeLocalOp;
+
+                    return rangeLocalOp;;
+                }
+                else
+                {
+
+                    RangeOperator rangeOp = new RangeOperator(context.CurrentExecutionOperator, startIndex, count);
+                    context.CurrentExecutionOperator = rangeOp;
+
+                    return rangeOp;
+                }
+            }
+        }
+    }
+
+    partial class WDecompose1TableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression decomposeTargetParameter = this.Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(decomposeTargetParameter != null, "decomposeTargetParameter != null");
+
+            int decomposeTargetIndex = context.LocateColumnReference(decomposeTargetParameter);
+            List<string> populateColumns = new List<string>();
+
+            for (int i = 1; i < this.Parameters.Count; i++)
+            {
+                WValueExpression populateColumn = this.Parameters[i] as WValueExpression;
+                Debug.Assert(populateColumn != null, "populateColumn != null");
+
+                populateColumns.Add(populateColumn.Value);
+            }
+
+            Decompose1Operator decompose1Op = new Decompose1Operator(context.CurrentExecutionOperator,
+                decomposeTargetIndex, populateColumns);
+            context.CurrentExecutionOperator = decompose1Op;
+
+            foreach (string populateColumn in populateColumns) {
+                context.AddField(Alias.Value, populateColumn, ColumnGraphType.Value);
+            }
+
+            return decompose1Op;
+        }
+    }
+
+    partial class WSimplePathTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression pathColumn = Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(pathColumn != null, "pathColumn != null");
+            int pathIndex = context.LocateColumnReference(pathColumn);
+
+            SimplePathOperator simplePathOp = new SimplePathOperator(context.CurrentExecutionOperator, pathIndex);
+            context.CurrentExecutionOperator = simplePathOp;
+
+            return simplePathOp;
+        }
+    }
+
+    partial class WCyclicPathTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression pathColumn = Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(pathColumn != null, "pathColumn != null");
+            int pathIndex = context.LocateColumnReference(pathColumn);
+
+            CyclicPathOperator cyclicPathOp = new CyclicPathOperator(context.CurrentExecutionOperator, pathIndex);
+            context.CurrentExecutionOperator = cyclicPathOp;
+
+            return cyclicPathOp;
         }
     }
 }

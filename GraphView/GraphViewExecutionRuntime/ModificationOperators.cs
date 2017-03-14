@@ -110,6 +110,372 @@ namespace GraphView
 
     }
 
+    internal class DropOperator : ModificationBaseOpertaor2
+    {
+        private readonly int dropTargetIndex;
+        private readonly GraphViewConnection connection;
+        private readonly GraphViewExecutionOperator dummyInputOp;
+
+        public DropOperator(GraphViewExecutionOperator dummyInputOp, GraphViewConnection connection, int dropTargetIndex)
+            : base(dummyInputOp, connection)
+        {
+            this.dropTargetIndex = dropTargetIndex;
+            this.connection = connection;
+            this.dummyInputOp = dummyInputOp;
+        }
+
+        private void DropVertex(VertexField vertexField)
+        {
+            RawRecord record = new RawRecord();
+            record.Append(new StringField(vertexField.VertexId));  // nodeIdIndex
+            DropNodeOperator op = new DropNodeOperator(this.dummyInputOp, this.connection, 0);
+            op.DataModify(record);
+
+            // Now VertexCacheObject has been updated (in DataModify)
+        }
+
+        private void DropEdge(EdgeField edgeField)
+        {
+            RawRecord record = new RawRecord();
+            record.Append(new StringField(edgeField.OutV));  // srcIdIndex
+            record.Append(new StringField(edgeField.Offset.ToString()));  // edgeOffsetIndex
+            DropEdgeOperator op = new DropEdgeOperator(this.dummyInputOp, this.connection, 0, 1);
+            op.DataModify(record);
+
+            // Now VertexCacheObject has been updated (in DataModify)
+        }
+
+        private void DropVertexProperty(VertexPropertyField vp)
+        {
+            // Update DocDB
+            VertexField vertexField = vp.Vertex;
+            JObject vertexObject = this.connection.RetrieveDocumentById(vertexField.VertexId);
+
+            Debug.Assert(vertexObject[vp.PropertyName] != null);
+            vertexObject[vp.PropertyName].Remove();
+
+            this.connection.ReplaceOrDeleteDocumentAsync(vertexField.VertexId, vertexObject, (string)vertexObject["_partition"]).Wait();
+
+            // Update vertex field
+            vertexField.VertexProperties.Remove(vp.PropertyName);
+        }
+
+        private void DropVertexSingleProperty(VertexSinglePropertyField vp)
+        {
+            // Update DocDB
+            VertexField vertexField = vp.VertexProperty.Vertex;
+            JObject vertexObject = this.connection.RetrieveDocumentById(vertexField.VertexId);
+
+            Debug.Assert(vertexObject[vp.PropertyName] != null);
+
+            JArray vertexProperty = (JArray)vertexObject[vp.PropertyName];
+            vertexProperty
+                .First(singleProperty => (string)singleProperty["_propId"] == vp.PropertyId)
+                .Remove();
+            if (vertexObject.Count == 0) {
+                vertexProperty.Remove();
+            }
+
+            this.connection.ReplaceOrDeleteDocumentAsync(vertexField.VertexId, vertexObject, (string)vertexObject["_partition"]).Wait();
+
+            // Update vertex field
+            VertexPropertyField vertexPropertyField = vertexField.VertexProperties[vp.PropertyName];
+            bool found = vertexPropertyField.Multiples.Remove(vp.PropertyId);
+            Debug.Assert(found);
+            if (!vertexPropertyField.Multiples.Any()) {
+                vertexField.VertexProperties.Remove(vp.PropertyName);
+            }
+
+        }
+
+        private void DropVertexPropertyMetaProperty(ValuePropertyField metaProperty)
+        {
+            Debug.Assert(metaProperty.Parent is VertexSinglePropertyField);
+            VertexSinglePropertyField vertexSingleProperty = (VertexSinglePropertyField)metaProperty.Parent;
+
+            VertexField vertexField = vertexSingleProperty.VertexProperty.Vertex;
+            JObject vertexObject = this.connection.RetrieveDocumentById(vertexField.VertexId);
+
+            Debug.Assert(vertexObject[vertexSingleProperty.PropertyName] != null);
+
+            JToken propertyJToken = ((JArray) vertexObject[vertexSingleProperty.PropertyName])
+                .First(singleProperty => (string) singleProperty["_propId"] == vertexSingleProperty.PropertyId);
+
+            JObject metaPropertyJObject = (JObject) propertyJToken?["_meta"];
+
+            metaPropertyJObject?.Property(metaProperty.PropertyName)?.Remove();
+
+            // Update DocDB
+            this.connection.ReplaceOrDeleteDocumentAsync(vertexField.VertexId, vertexObject, (string)vertexObject["_partition"]).Wait();
+
+            // Update vertex field
+            vertexSingleProperty.MetaProperties.Remove(metaProperty.PropertyName);
+        }
+
+        private void DropEdgeProperty(EdgePropertyField ep)
+        {
+            //EdgeField edgeField = ep.Edge;
+            //if (edgeField.EdgeDocID != null) {  // This is a spilled edge
+            //    JObject edgeDocument = this.connection.RetrieveDocumentById(edgeField.EdgeDocID);
+            //    ((JArray)edgeDocument["_edge"])
+            //        .First(edge => (string)edge["_srcV"] == edgeField.OutV && (long)edge["_offset"] == edgeField.Offset)
+            //        [ep.PropertyName]
+            //        .Remove();
+            //    this.connection.ReplaceOrDeleteDocumentAsync(edgeField.EdgeDocID, edgeDocument).Wait();
+            //}
+            //else {  // This is not a spilled edge
+            //    JObject edgeDocument = this.connection.RetrieveDocumentById(edgeField.EdgeDocID);
+            //    ((JArray)edgeDocument["_edge"])
+            //        .First(edge => (string)edge["_srcV"] == edgeField.OutV && (long)edge["_offset"] == edgeField.Offset)
+            //        [ep.PropertyName]
+            //        .Remove();
+            //    this.connection.ReplaceOrDeleteDocumentAsync(edgeField.EdgeDocID, edgeDocument).Wait();
+            //}
+
+            //// Update edge field
+            //bool found = edgeField.EdgeProperties.Remove(ep.PropertyName);
+            //Debug.Assert(found);
+
+            List<Tuple<WValueExpression, WValueExpression, int>> propertyList = new List<Tuple<WValueExpression, WValueExpression, int>>();
+            propertyList.Add(
+                new Tuple<WValueExpression, WValueExpression, int>(
+                    new WValueExpression(ep.PropertyName, true), 
+                    new WValueExpression("null", false), 
+                    0));
+            UpdateEdgePropertiesOperator op = new UpdateEdgePropertiesOperator(
+                this.dummyInputOp, 
+                this.connection,
+                0, 1, 
+                propertyList
+                );
+            RawRecord record = new RawRecord();
+            record.Append(new StringField(ep.Edge.OutV));
+            record.Append(new StringField(ep.Edge.Offset.ToString()));
+            op.DataModify(record);
+
+            // Now VertexCacheObject has been updated (in DataModify)
+            Debug.Assert(!ep.Edge.EdgeProperties.ContainsKey(ep.PropertyName));
+        }
+
+        internal override RawRecord DataModify(RawRecord record)
+        {
+            FieldObject dropTarget = record[this.dropTargetIndex];
+
+            VertexField vertexField = dropTarget as VertexField;;
+            if (vertexField != null) {
+                this.DropVertex(vertexField);
+                return null;
+            }
+
+            EdgeField edgeField = dropTarget as EdgeField;
+            if (edgeField != null)
+            {
+                this.DropEdge(edgeField);
+                return null;
+            }
+
+            PropertyField property = dropTarget as PropertyField;
+            if (property != null)
+            {
+                if (property is VertexPropertyField)
+                {
+                    this.DropVertexProperty((VertexPropertyField)property);
+                }
+                else if (property is VertexSinglePropertyField)
+                {
+                    this.DropVertexSingleProperty((VertexSinglePropertyField)property);
+                }
+                else if (property is EdgePropertyField)
+                {
+                    this.DropEdgeProperty((EdgePropertyField)property);
+                }
+                else
+                {
+                    this.DropVertexPropertyMetaProperty((ValuePropertyField)property);
+                }
+
+                return null;
+            }
+
+            //
+            // Should not reach here
+            //
+            throw new Exception("BUG: Should not get here");
+            return null;
+        }
+    }
+
+    internal class UpdatePropertiesOperator : ModificationBaseOpertaor2
+    {
+        private readonly int updateTargetIndex;
+        private readonly List<WPropertyExpression> updateProperties;
+
+        public UpdatePropertiesOperator(
+            GraphViewExecutionOperator dummyInputOp,
+            GraphViewConnection connection,
+            int updateTargetIndex,
+            List<WPropertyExpression> updateProperties)
+            : base(dummyInputOp, connection)
+        {
+            this.updateTargetIndex = updateTargetIndex;
+            this.updateProperties = updateProperties;
+        }
+
+        private void UpdatePropertiesOfVertex(VertexField vertex)
+        {
+            JObject vertexDocument = this.Connection.RetrieveDocumentById(vertex.VertexId);
+            foreach (WPropertyExpression property in this.updateProperties) {
+                Debug.Assert(property.Value != null);
+
+                VertexPropertyField vertexProperty;
+                string name = property.Key.Value;
+
+                // Construct single property
+                JObject meta = new JObject();
+                foreach (KeyValuePair<WValueExpression, WValueExpression> pair in property.MetaProperties) {
+                    meta[pair.Key.Value] = pair.Value.ToJValue();
+                }
+                JObject singleProperty = new JObject {
+                    ["_value"] = property.Value.ToJValue(),
+                    ["_propId"] = GraphViewConnection.GenerateDocumentId(),
+                    ["_meta"] = meta,
+                };
+
+                // Set / Append to multiProperty
+                JArray multiProperty;
+                if (vertexDocument[name] == null) {
+                    multiProperty = new JArray();
+                    vertexDocument[name] = multiProperty;
+                }
+                else {
+                    multiProperty = (JArray)vertexDocument[name];
+                }
+
+                if (property.Cardinality == GremlinKeyword.PropertyCardinality.single) {
+                    multiProperty.Clear();
+                }
+                multiProperty.Add(singleProperty);
+
+                // Update vertex field
+                bool existed = vertex.VertexProperties.TryGetValue(name, out vertexProperty);
+                if (!existed) {
+                    vertexProperty = new VertexPropertyField(vertexDocument.Property(name), vertex);
+                    vertex.VertexProperties.Add(name, vertexProperty);
+                }
+                else {
+                    vertexProperty.Replace(vertexDocument.Property(name));
+                }
+            }
+
+            // Upload to DocDB
+            this.Connection.ReplaceOrDeleteDocumentAsync(vertex.VertexId, vertexDocument, (string)vertexDocument["_partition"]).Wait();
+        }
+
+        private void UpdatePropertiesOfEdge(EdgeField edge)
+        {
+            List<Tuple<WValueExpression, WValueExpression, int>> propertyList =
+                new List<Tuple<WValueExpression, WValueExpression, int>>();
+            foreach (WPropertyExpression property in this.updateProperties) {
+                if (property.Cardinality == GremlinKeyword.PropertyCardinality.list ||
+                    property.MetaProperties.Count > 0) {
+                    throw new Exception("Can't create meta property or duplicated property on edges");
+                }
+
+                propertyList.Add(new Tuple<WValueExpression, WValueExpression, int>(property.Key, property.Value, 0));
+            }
+
+            RawRecord record = new RawRecord();
+            record.Append(new StringField(edge.OutV));
+            record.Append(new StringField(edge.Offset.ToString()));
+            UpdateEdgePropertiesOperator op = new UpdateEdgePropertiesOperator(this.InputOperator, this.Connection, 0, 1, propertyList);
+            op.DataModify(record);
+        }
+
+        private void UpdateMetaPropertiesOfSingleVertexProperty(VertexSinglePropertyField vp)
+        {
+            string vertexId = vp.VertexProperty.Vertex.VertexId;
+            JObject vertexDocument = this.Connection.RetrieveDocumentById(vertexId);
+            JObject singleProperty = (JObject)((JArray)vertexDocument[vp.PropertyName])
+                .First(single => (string) single["_propId"] == vp.PropertyId);
+            JObject meta = (JObject)singleProperty["_meta"];
+
+            foreach (WPropertyExpression property in this.updateProperties) {
+                if (property.Cardinality == GremlinKeyword.PropertyCardinality.list ||
+                    property.MetaProperties.Count > 0) {
+                    throw new Exception("Can't create meta property or duplicated property on vertex-property's meta property");
+                }
+
+                meta[property.Key.Value] = property.Value.ToJValue();
+            }
+
+            // Update vertex single property
+            vp.Replace(singleProperty);
+
+            // Upload to DocDB
+            this.Connection.ReplaceOrDeleteDocumentAsync(vertexId, vertexDocument, (string)vertexDocument["_partition"]).Wait();
+        }
+
+        internal override RawRecord DataModify(RawRecord record)
+        {
+            FieldObject updateTarget = record[this.updateTargetIndex];
+
+            VertexField vertex = updateTarget as VertexField; ;
+            if (vertex != null)
+            {
+                this.UpdatePropertiesOfVertex(vertex);
+
+                return record;
+            }
+
+            EdgeField edge = updateTarget as EdgeField;
+            if (edge != null)
+            {
+                this.UpdatePropertiesOfEdge(edge);
+
+                return record;
+            }
+
+            PropertyField property = updateTarget as PropertyField;
+            if (property != null)
+            {
+                if (property is VertexSinglePropertyField)
+                {
+                    this.UpdateMetaPropertiesOfSingleVertexProperty((VertexSinglePropertyField) property);
+                }
+                else
+                {
+                    throw new GraphViewException($"BUG: updateTarget is {nameof(PropertyField)}: {property.GetType()}");
+                }
+
+                return record;
+            }
+
+            //
+            // Should not reach here
+            //
+            throw new Exception("BUG: Should not get here!");
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord srcRecord = null;
+
+            while (InputOperator.State() && (srcRecord = InputOperator.Next()) != null)
+            {
+                RawRecord result = DataModify(srcRecord);
+                if (result == null) continue;
+
+                //
+                // Return the srcRecord
+                //
+                return srcRecord;
+            }
+
+            Close();
+            return null;
+        }
+    }
+
     internal class DropNodeOperator : ModificationBaseOpertaor2
     {
         private int _nodeIdIndex;
@@ -161,7 +527,8 @@ namespace GraphView
             Debug.Assert(vertexObject["_reverse_edge"] is JArray);
             Debug.Assert(((JArray)vertexObject["_reverse_edge"]).Count == 0);
 #endif
-            this.Connection.ReplaceOrDeleteDocumentAsync(vertexId, null).Wait();
+            // NOTE: for vertex document, id = _partition
+            this.Connection.ReplaceOrDeleteDocumentAsync(vertexId, null, vertexId).Wait();
 
             // Update VertexCache
             this.Connection.VertexCache.TryRemoveVertexField(vertexId);
@@ -360,7 +727,7 @@ namespace GraphView
                 sinkEdgeDocId = srcEdgeDocId;
             }
 
-            Dictionary<string, JObject> uploadDocuments = new Dictionary<string, JObject>();
+            Dictionary<string, Tuple<JObject, string>> uploadDocuments = new Dictionary<string, Tuple<JObject, string>>();
             EdgeDocumentHelper.RemoveEdge(uploadDocuments, this.Connection, srcEdgeDocId, srcVertexObject, false, srcId, edgeOffset);
             EdgeDocumentHelper.RemoveEdge(uploadDocuments, this.Connection, sinkEdgeDocId, sinkVertexObject, true, srcId, edgeOffset);
             this.Connection.ReplaceOrDeleteDocumentsAsync(uploadDocuments).Wait();
@@ -464,79 +831,96 @@ namespace GraphView
         }
     }
 
-    internal class UpdateNodePropertiesOperator : UpdatePropertiesBaseOperator
-    {
-        private int _nodeIdIndex;
+    //internal class UpdateNodePropertiesOperator : UpdatePropertiesBaseOperator
+    //{
+    //    private int _nodeIdIndex;
 
-        public UpdateNodePropertiesOperator(GraphViewExecutionOperator inputOp, GraphViewConnection connection,
-                                            int pNodeIndex, List<Tuple<WValueExpression, WValueExpression, int>> pPropertiesList, UpdatePropertyMode pMode = UpdatePropertyMode.Set)
-            : base(inputOp, connection, pPropertiesList, pMode)
-        {
-            _nodeIdIndex = pNodeIndex;
-        }
+    //    public UpdateNodePropertiesOperator(GraphViewExecutionOperator inputOp, GraphViewConnection connection,
+    //                                        int pNodeIndex, List<Tuple<WValueExpression, WValueExpression, int>> pPropertiesList, UpdatePropertyMode pMode = UpdatePropertyMode.Set)
+    //        : base(inputOp, connection, pPropertiesList, pMode)
+    //    {
+    //        _nodeIdIndex = pNodeIndex;
+    //    }
 
-        internal override RawRecord DataModify(RawRecord record)
-        {
-            string vertexId = record[this._nodeIdIndex].ToValue;
+    //    internal override RawRecord DataModify(RawRecord record)
+    //    {
+    //        string vertexId = record[this._nodeIdIndex].ToValue;
 
-            JObject vertexDocObject = this.Connection.RetrieveDocumentById(vertexId);
+    //        JObject vertexDocObject = this.Connection.RetrieveDocumentById(vertexId);
 
-            var documentsMap = new Dictionary<string, JObject>();
-            UpdateNodeProperties(documentsMap, vertexId, vertexDocObject, PropertiesToBeUpdated, Mode);
-            this.Connection.ReplaceOrDeleteDocumentsAsync(documentsMap).Wait();
+    //        UpdateNodeProperties(vertexId, vertexDocObject, PropertiesToBeUpdated, Mode);
+    //        this.Connection.ReplaceOrDeleteDocumentAsync(vertexId, vertexDocObject, (string)vertexDocObject["_partition"]).Wait();
 
-            // Drop step, return null
-            if (PropertiesToBeUpdated.Any(t => t.Item2 == null)) return null;
-            return record;
-        }
+    //        // Drop step, return null
+    //        if (PropertiesToBeUpdated.Any(t => t.Item2 == null)) return null;
+    //        return record;
+    //    }
 
-        private void UpdateNodeProperties(
-            Dictionary<string, JObject> documentsMap,
-            string vertexId,
-            JObject vertexDocObject,
-            List<Tuple<WValueExpression, WValueExpression, int>> propList,
-            UpdatePropertyMode mode)
-        {
-            VertexField vertexField = this.Connection.VertexCache.GetVertexField(vertexId);
+    //    private void UpdateNodeProperties(
+    //        string vertexId,
+    //        JObject vertexDocObject,
+    //        List<Tuple<WValueExpression, WValueExpression, int>> propList,
+    //        UpdatePropertyMode mode)
+    //    {
+    //        VertexField vertexField = this.Connection.VertexCache.GetVertexField(vertexId);
 
-            // Drop all non-reserved properties
-            if (propList.Count == 1 &&
-                !propList[0].Item1.SingleQuoted &&
-                propList[0].Item1.Value.Equals("*", StringComparison.OrdinalIgnoreCase) &&
-                !propList[0].Item2.SingleQuoted &&
-                propList[0].Item2.Value.Equals("null", StringComparison.OrdinalIgnoreCase))
-            {
-                List<string> toBeDroppedPropertiesNames = GraphViewJsonCommand.DropAllNodeProperties(vertexDocObject);
-                foreach (var propertyName in toBeDroppedPropertiesNames)
-                {
-                    vertexField.VertexProperties.Remove(propertyName);
-                }
-            }
-            else
-            {
-                foreach (var t in propList)
-                {
-                    WValueExpression keyExpression = t.Item1;
-                    WValueExpression valueExpression = t.Item2;
+    //        // Drop all non-reserved properties
+    //        if (propList.Count == 1 &&
+    //            !propList[0].Item1.SingleQuoted &&
+    //            propList[0].Item1.Value.Equals("*", StringComparison.OrdinalIgnoreCase) &&
+    //            !propList[0].Item2.SingleQuoted &&
+    //            propList[0].Item2.Value.Equals("null", StringComparison.OrdinalIgnoreCase))
+    //        {
+    //            List<string> toBeDroppedPropertiesNames = GraphViewJsonCommand.DropAllNodeProperties(vertexDocObject);
+    //            foreach (var propertyName in toBeDroppedPropertiesNames)
+    //            {
+    //                vertexField.VertexProperties.Remove(propertyName);
+    //            }
+    //        }
+    //        else
+    //        {
+    //            foreach (var t in propList)
+    //            {
+    //                WValueExpression keyExpression = t.Item1;
+    //                WValueExpression valueExpression = t.Item2;
 
-                    if (mode == UpdatePropertyMode.Set)
-                    {
-                        JProperty updatedProperty = GraphViewJsonCommand.UpdateProperty(vertexDocObject, keyExpression, valueExpression);
-                        if (updatedProperty == null)
-                            vertexField.VertexProperties.Remove(keyExpression.Value);
-                        else
-                            vertexField.UpdateVertexProperty(updatedProperty.Name, updatedProperty.Value.ToString(),
-                                JsonDataTypeHelper.GetJsonDataType(updatedProperty.Value.Type));
-                    }
-                    else {
-                        throw new NotImplementedException();
-                    }
-                }
-            }
+    //                if (mode == UpdatePropertyMode.Set) {
+    //                    string name = (string)keyExpression.ToJValue();
+    //                    JValue value = valueExpression.ToJValue();
 
-            documentsMap[vertexId] = vertexDocObject;
-        }
-    }
+    //                    if (value == null) {
+    //                        vertexField.VertexProperties.Remove(keyExpression.Value);
+    //                    }
+    //                    else {
+    //                        string propertyId;
+    //                        if (vertexField.VertexProperties.ContainsKey(name)) {
+    //                            // TODO: HACK
+    //                            propertyId = vertexField.VertexProperties[name].Multiples.Values.First().PropertyId;
+    //                        }
+    //                        else {
+    //                            propertyId = GraphViewConnection.GenerateDocumentId();
+    //                        }
+
+    //                        JProperty multiProperty = new JProperty(name) {
+    //                            Value = new JArray {
+    //                                new JObject {
+    //                                    ["_value"] = value,
+    //                                    ["_propId"] = propertyId,
+    //                                    ["_meta"] = new JObject(),
+    //                                }
+    //                            }
+    //                        };
+    //                        vertexDocObject[multiProperty.Name] = multiProperty.Value;
+    //                        vertexField.ReplaceProperty(multiProperty);
+    //                    }
+    //                }
+    //                else {
+    //                    throw new NotImplementedException();
+    //                }
+    //            }
+    //        }
+    //    }
+    //}
 
     internal class UpdateEdgePropertiesOperator : UpdatePropertiesBaseOperator
     {
@@ -626,8 +1010,7 @@ namespace GraphView
                         if (updatedProperty == null)
                             outEdgeField.EdgeProperties.Remove(keyExpression.Value);
                         else
-                            outEdgeField.UpdateEdgeProperty(updatedProperty.Name, updatedProperty.Value.ToString(),
-                                JsonDataTypeHelper.GetJsonDataType(updatedProperty.Value.Type));
+                            outEdgeField.UpdateEdgeProperty(updatedProperty, outEdgeField);
 
                         // Modify edgeObject (update the edge property)
                         updatedProperty = GraphViewJsonCommand.UpdateProperty(inEdgeObject, keyExpression, valueExpression);
@@ -635,8 +1018,7 @@ namespace GraphView
                         if (updatedProperty == null)
                             inEdgeField.EdgeProperties.Remove(keyExpression.Value);
                         else
-                            inEdgeField.UpdateEdgeProperty(updatedProperty.Name, updatedProperty.Value.ToString(),
-                                JsonDataTypeHelper.GetJsonDataType(updatedProperty.Value.Type));
+                            inEdgeField.UpdateEdgeProperty(updatedProperty, inEdgeField);
                     }
                     else {
                         throw new NotImplementedException();

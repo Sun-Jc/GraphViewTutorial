@@ -15,10 +15,10 @@ namespace GraphView
             GremlinVariableList = new List<GremlinVariable>(gremlinVariableList);
         }
 
-        internal override GremlinVariableProperty DefaultVariableProperty()
-        {
-            return new GremlinVariableProperty(null, GremlinKeyword.ScalarValue);
-        }
+        //internal override GremlinVariableProperty DefaultVariableProperty()
+        //{
+        //    return new GremlinVariableProperty(null, GremlinKeyword.ScalarValue);
+        //}
 
         internal override void Populate(string property)
         {
@@ -58,14 +58,5 @@ namespace GraphView
         {
             return GetVariableType();
         }
-
-        internal override void Unfold(GremlinToSqlContext currentContext)
-        {
-            GremlinTableVariable newVariable = GremlinUnfoldVariable.Create(this);
-            currentContext.VariableList.Add(newVariable);
-            currentContext.TableReferences.Add(newVariable);
-            currentContext.SetPivotVariable(newVariable);
-        }
-
     }
 }

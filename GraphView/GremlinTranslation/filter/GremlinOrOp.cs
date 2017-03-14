@@ -10,24 +10,49 @@ namespace GraphView
     internal class GremlinOrOp : GremlinTranslationOperator
     {
         public List<GraphTraversal2> OrTraversals { get; set; }
+        public GraphTraversal2 FirstTraversal { get; set; }
+        public GraphTraversal2 SecondTraversal { get; set; }
+        public bool IsInfix { get; set; }
 
         public GremlinOrOp(params GraphTraversal2[] orTraversals)
         {
             OrTraversals = new List<GraphTraversal2>(orTraversals);
         }
 
+        public GremlinOrOp(GraphTraversal2 firsTraversal, GraphTraversal2 secondTraversal)
+        {
+            FirstTraversal = firsTraversal;
+            SecondTraversal = secondTraversal;
+            IsInfix = true;
+        }
+
         internal override GremlinToSqlContext GetContext()
         {
             GremlinToSqlContext inputContext = InputOperator.GetContext();
-
-            List<GremlinToSqlContext> andContexts = new List<GremlinToSqlContext>();
-            foreach (var orTraversal in OrTraversals)
+            if (inputContext.PivotVariable == null)
             {
-                orTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
-                andContexts.Add(orTraversal.GetEndOp().GetContext());
+                throw new QueryCompilationException("The PivotVariable can't be null.");
             }
 
-            inputContext.PivotVariable.Or(inputContext, andContexts);
+            List<GremlinToSqlContext> orContexts = new List<GremlinToSqlContext>();
+            if (IsInfix)
+            {
+                FirstTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
+                orContexts.Add(FirstTraversal.GetEndOp().GetContext());
+
+                SecondTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
+                orContexts.Add(SecondTraversal.GetEndOp().GetContext());
+            }
+            else
+            {
+                foreach (var orTraversal in OrTraversals)
+                {
+                    orTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
+                    orContexts.Add(orTraversal.GetEndOp().GetContext());
+                }
+            }
+
+            inputContext.PivotVariable.Or(inputContext, orContexts);
 
             return inputContext;
         }

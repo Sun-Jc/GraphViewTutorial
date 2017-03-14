@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace GraphView
 {
-    internal class GremlinProjectOp: GremlinTranslationOperator, IGremlinByModulating
+    internal class GremlinProjectOp: GremlinTranslationOperator
     {
         public List<string> ProjectKeys { get; set; }
         public List<GraphTraversal2> ByGraphTraversal { get; set; }
@@ -20,6 +20,10 @@ namespace GraphView
         internal override GremlinToSqlContext GetContext()
         {
             GremlinToSqlContext inputContext = GetInputContext();
+            if (inputContext.PivotVariable == null)
+            {
+                throw new QueryCompilationException("The PivotVariable can't be null.");
+            }
 
             List<GremlinToSqlContext> byContexts = new List<GremlinToSqlContext>();
             foreach (var traversal in ByGraphTraversal)
@@ -32,25 +36,19 @@ namespace GraphView
 
             return inputContext;
         }
-
-        public void ModulateBy()
-        {
-            throw new NotImplementedException();
-        }
-
-        public void ModulateBy(GraphTraversal2 traversal)
+        public override void ModulateBy(GraphTraversal2 traversal)
         {
             ByGraphTraversal.Add(traversal);
         }
 
-        public void ModulateBy(string key)
+        public override void ModulateBy()
         {
-            throw new NotImplementedException();
+            ByGraphTraversal.Add(GraphTraversal2.__());
         }
 
-        public void ModulateBy(GremlinKeyword.Order order)
+        public override void ModulateBy(string key)
         {
-            throw new NotImplementedException();
+            ByGraphTraversal.Add(GraphTraversal2.__().Values(key));
         }
     }
 }

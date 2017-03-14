@@ -1,11 +1,14 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.Azure.Documents.Client;
 using Newtonsoft.Json.Linq;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Globalization;
 
 // Add DocumentDB references
 
@@ -13,25 +16,12 @@ namespace GraphView
 {
     internal abstract class FieldObject
     {
-        public static VertexPropertyField GetVertexPropertyField(JProperty property)
-        {
-            return new VertexPropertyField(property.Name, property.Value.ToString(),
-                JsonDataTypeHelper.GetJsonDataType(property.Value.Type));
-        }
-
-        public static EdgePropertyField GetEdgePropertyField(JProperty property)
-        {
-            return new EdgePropertyField(property.Name, property.Value.ToString(),
-                JsonDataTypeHelper.GetJsonDataType(property.Value.Type));
-        }
-
         public static VertexField ConstructVertexField(GraphViewConnection connection, JObject vertexObject, Dictionary<string, JObject> edgeDocDict)
         {
             VertexField vertexField = new VertexField(connection);
-            vertexField.JsonDocument = vertexObject;
 
-            string vertexId = null;
-            string vertexLabel = null;
+            string vertexId = (string)vertexObject["id"];
+            string vertexLabel = (string)vertexObject["label"];
 
             //
             // "_edge" & "_reverse_edge" could be either JObject or JArray:
@@ -44,30 +34,32 @@ namespace GraphView
             JToken backwardAdjList = null;
 
             foreach (JProperty property in vertexObject.Properties()) {
+
+                // For meta-properties
+                // "_id", "label", "_nextEdgeOffset", "_partition"
+                if (VertexField.IsVertexMetaProperty(property.Name)) {
+                    vertexField.VertexMetaProperties.Add(property.Name, new ValuePropertyField(property, vertexField));
+                    continue;
+                }
+
+                // For other properties
                 switch (property.Name) {
-                // DocumentDB-reserved JSON properties
                 case "_rid":
                 case "_self":
                 case "_etag":
                 case "_attachments":
                 case "_ts":
                     continue;
-                case "id": // "id"
-                    vertexId = property.Value.ToString();
-                    vertexField.VertexProperties.Add(property.Name, GetVertexPropertyField(property));
-                    break;
-                case "label": // "label"
-                    vertexLabel = property.Value.ToString();
-                    vertexField.VertexProperties.Add(property.Name, GetVertexPropertyField(property));
-                    break;
+
                 case "_edge": // "_edge"
                     forwardAdjList = property.Value;
                     break;
                 case "_reverse_edge": // "_reverse_edge"
                     backwardAdjList = property.Value;
                     break;
+
                 default: // user-defined properties
-                    vertexField.VertexProperties.Add(property.Name, GetVertexPropertyField(property));
+                    vertexField.VertexProperties.Add(property.Name, new VertexPropertyField(property, vertexField));
                     break;
                 }
             }
@@ -224,11 +216,11 @@ namespace GraphView
             return result;
         }
 
-
-
         public virtual string ToGraphSON() => ToString();
 
         public virtual string ToValue => ToString();
+
+        public virtual Object ToObject() { return this; }
 
     }
 
@@ -252,7 +244,30 @@ namespace GraphView
         {
             if (JsonDataType == JsonDataType.String) 
                return "\"" + Value + "\"";
+            else if (JsonDataType == JsonDataType.Boolean)
+                return Value.ToLowerInvariant();
             return Value;
+        }
+
+        public override object ToObject()
+        {
+            switch (JsonDataType)
+            {
+                case JsonDataType.Boolean:
+                    return bool.Parse(Value);
+                case JsonDataType.Int:
+                    return int.Parse(Value);
+                case JsonDataType.Long:
+                    return long.Parse(Value);
+                case JsonDataType.Double:
+                    return double.Parse(Value);
+                case JsonDataType.Float:
+                    return float.Parse(Value);
+                case JsonDataType.Null:
+                    return null;
+                default:
+                    return Value;
+            }
         }
 
         public override int GetHashCode()
@@ -265,12 +280,12 @@ namespace GraphView
             if (Object.ReferenceEquals(this, obj)) return true;
 
             StringField stringField = obj as StringField;
-            if (stringField == null)
-            {
+            if (stringField == null) {
                 return false;
             }
 
-            return Value.Equals(stringField.Value);
+            return this.JsonDataType == stringField.JsonDataType &&
+                   this.Value.Equals(stringField.Value, StringComparison.InvariantCultureIgnoreCase);
         }
 
         public override string ToValue
@@ -357,35 +372,84 @@ namespace GraphView
         }
     }
 
-    internal class MapField : FieldObject
+    internal class MapField : FieldObject, IEnumerable<KeyValuePair<FieldObject, FieldObject>>
     {
-        public Dictionary<FieldObject, FieldObject> Map { get; set; }
+        private Dictionary<FieldObject, FieldObject> map;
+        public List<FieldObject> Order { get; set; } 
+
+        public int Count { get { return map.Count; } }
 
         public MapField()
         {
-            Map = new Dictionary<FieldObject, FieldObject>();
+            this.map = new Dictionary<FieldObject, FieldObject>();
+            this.Order = new List<FieldObject>();
         }
 
-        public MapField(Dictionary<FieldObject, FieldObject> map)
+        public MapField(int capacity)
         {
-            Map = map;
+            this.map = new Dictionary<FieldObject, FieldObject>(capacity);
+            this.Order = new List<FieldObject>(capacity);
+        }
+
+        public void Add(FieldObject key, FieldObject value)
+        {
+            this.map.Add(key, value);
+            this.Order.Add(key);
+        }
+
+        public bool Remove(FieldObject key)
+        {
+            bool isRemoved = this.map.Remove(key);
+            if (isRemoved) {
+                this.Order.Remove(key);
+            }
+
+            return isRemoved;
+        }
+
+        public bool RemoveAt(int index)
+        {
+            if (Order.Count == 0 || index >= Order.Count || index < 0) {
+                return false;
+            }
+
+            this.map.Remove(this.Order[index]);
+            this.Order.RemoveAt(index);
+            return true;
+        }
+
+        public FieldObject this[FieldObject key]
+        {
+            get
+            {
+                FieldObject value;
+                this.map.TryGetValue(key, out value);
+                return value;
+            }
+            set
+            {
+                if (!this.map.ContainsKey(key))
+                {
+                    this.Order.Add(key);
+                    this.map.Add(key, value);
+                } else {
+                    this.map[key] = value;
+                }
+            }
         }
 
         public override string ToString()
         {
-            if (Map.Count == 0) return "[]";
+            if (this.map.Count == 0) return "[]";
 
-            var mapStringBuilder = new StringBuilder("[");
-            var i = 0;
+            StringBuilder mapStringBuilder = new StringBuilder("[");
+            int i = 0;
 
-            foreach (var pair in Map)
+            foreach (FieldObject key in Order)
             {
-                var key = pair.Key;
-                var value = pair.Value;
-
                 if (i++ > 0)
                     mapStringBuilder.Append(", ");
-                mapStringBuilder.Append(key.ToString()).Append(":").Append(value.ToString());
+                mapStringBuilder.Append(key.ToString()).Append(":").Append(this.map[key].ToString());
             }
 
             mapStringBuilder.Append(']');
@@ -399,18 +463,17 @@ namespace GraphView
             sb.Append("{");
 
             bool firstEntry = true;
-            foreach (var entry in Map)
+
+            foreach (FieldObject entry in this.Order)
             {
-                if (firstEntry)
-                {
+                if (firstEntry) {
                     firstEntry = false;
                 }
-                else
-                {
+                else {
                     sb.Append(", ");
                 }
 
-                sb.AppendFormat("{0}: {1}", entry.Key.ToGraphSON(), entry.Value.ToGraphSON());
+                sb.AppendFormat("\"{0}\": {1}", entry.ToValue, this.map[entry].ToGraphSON());
             }
 
             sb.Append("}");
@@ -422,16 +485,15 @@ namespace GraphView
             if (Object.ReferenceEquals(this, obj)) return true;
 
             MapField mapField = obj as MapField;
-            if (mapField == null || Map.Count != mapField.Map.Count)
-            {
+            if (mapField == null || this.map.Count != mapField.map.Count) {
                 return false;
             }
 
-            foreach (var kvp in Map)
+            foreach (KeyValuePair<FieldObject, FieldObject> kvp in this.map)
             {
-                var key = kvp.Key;
+                FieldObject key = kvp.Key;
                 FieldObject value2;
-                if (!mapField.Map.TryGetValue(key, out value2))
+                if (!mapField.map.TryGetValue(key, out value2))
                     return false;
                 if (!kvp.Value.Equals(value2))
                     return false;
@@ -442,46 +504,96 @@ namespace GraphView
 
         public override int GetHashCode()
         {
-            return ToString().GetHashCode();
+            if (this.map.Count == 0) return "[]".GetHashCode();
+
+            StringBuilder mapStringBuilder = new StringBuilder("[");
+            int i = 0;
+
+            foreach (KeyValuePair<FieldObject, FieldObject> kvp in this.map)
+            {
+                FieldObject key = kvp.Key;
+                FieldObject value = kvp.Value;
+
+                if (i++ > 0)
+                    mapStringBuilder.Append(", ");
+                mapStringBuilder.Append(key.ToString()).Append(":").Append(value.ToString());
+            }
+
+            mapStringBuilder.Append(']');
+
+            return mapStringBuilder.ToString().GetHashCode();
+        }
+
+        public IEnumerator<KeyValuePair<FieldObject, FieldObject>> GetEnumerator()
+        {
+            foreach (KeyValuePair<FieldObject, FieldObject> keyValuePair in map) {
+                yield return keyValuePair;
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return this.GetEnumerator();
         }
     }
 
     internal class Compose1Field : FieldObject
     {
-        public Dictionary<FieldObject, FieldObject> Map { get; set; }
-        public FieldObject DefaultProjectionKey { get; set; }
+        public Dictionary<string, FieldObject> CompositeFieldObject { get; set; }
+        public string DefaultProjectionKey { get; set; }
 
-        public Compose1Field(Dictionary<FieldObject, FieldObject> map, FieldObject defaultProjectionKey)
+        public Compose1Field(Dictionary<string, FieldObject> compositeFieldObject, string defaultProjectionKey)
         {
-            Map = map;
+            CompositeFieldObject = compositeFieldObject;
             DefaultProjectionKey = defaultProjectionKey;
+        }
+
+        public bool TryGetFieldObject(string key, out FieldObject fieldObject)
+        {
+            return CompositeFieldObject.TryGetValue(key, out fieldObject);
+        }
+
+        public FieldObject this[string key]
+        {
+            get
+            {
+                FieldObject value;
+                this.CompositeFieldObject.TryGetValue(key, out value);
+                return value;
+            }
+            set
+            {
+                this.CompositeFieldObject[key] = value;
+            }
         }
 
         public override string ToString()
         {
-            return Map[DefaultProjectionKey].ToString();
+            return CompositeFieldObject[DefaultProjectionKey].ToString();
         }
+
+        public override string ToValue => CompositeFieldObject[DefaultProjectionKey].ToValue;
 
         public override string ToGraphSON()
         {
-            return Map[DefaultProjectionKey].ToGraphSON();
+            return CompositeFieldObject[DefaultProjectionKey].ToGraphSON();
         }
 
         public override bool Equals(object obj)
         {
             if (Object.ReferenceEquals(this, obj)) return true;
 
-            MapField mapField = obj as MapField;
-            if (mapField == null || Map.Count != mapField.Map.Count)
+            Compose1Field compose1Field = obj as Compose1Field;
+            if (compose1Field == null || CompositeFieldObject.Count != compose1Field.CompositeFieldObject.Count)
             {
                 return false;
             }
 
-            foreach (var kvp in Map)
+            foreach (KeyValuePair<string, FieldObject> kvp in CompositeFieldObject)
             {
-                var key = kvp.Key;
+                string key = kvp.Key;
                 FieldObject value2;
-                if (!mapField.Map.TryGetValue(key, out value2))
+                if (!compose1Field.CompositeFieldObject.TryGetValue(key, out value2))
                     return false;
                 if (!kvp.Value.Equals(value2))
                     return false;
@@ -492,15 +604,15 @@ namespace GraphView
 
         public override int GetHashCode()
         {
-            if (Map.Count == 0) return "[]".GetHashCode();
+            if (CompositeFieldObject.Count == 0) return "[]".GetHashCode();
 
-            var mapStringBuilder = new StringBuilder("[");
-            var i = 0;
+            StringBuilder mapStringBuilder = new StringBuilder("[");
+            int i = 0;
 
-            foreach (var pair in Map)
+            foreach (KeyValuePair<string, FieldObject> pair in CompositeFieldObject)
             {
-                var key = pair.Key;
-                var value = pair.Value;
+                string key = pair.Key;
+                FieldObject value = pair.Value;
 
                 if (i++ > 0)
                     mapStringBuilder.Append(", ");
@@ -513,35 +625,45 @@ namespace GraphView
         }
     }
 
-    internal class PropertyField : FieldObject
+    internal abstract class PropertyField : FieldObject
     {
         public string PropertyName { get; private set; }
-        public string PropertyValue { get; set; }
-        public JsonDataType JsonDataType { get; set; }
+        public virtual string PropertyValue { get; set; }
+        public virtual JsonDataType JsonDataType { get; set; }
 
-        public PropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType)
+        protected PropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType)
         {
+            Debug.Assert(this is VertexPropertyField || propertyValue != null);
+
             PropertyName = propertyName;
             PropertyValue = propertyValue;
             JsonDataType = jsonDataType;
         }
 
+        public object ToPropertyValueObject()
+        {
+            switch (JsonDataType)
+            {
+                case JsonDataType.Boolean:
+                    return bool.Parse(PropertyValue);
+                case JsonDataType.Int:
+                    return int.Parse(PropertyValue);
+                case JsonDataType.Long:
+                    return long.Parse(PropertyValue);
+                case JsonDataType.Double:
+                    return double.Parse(PropertyValue);
+                case JsonDataType.Float:
+                    return float.Parse(PropertyValue);
+                case JsonDataType.Null:
+                    return null;
+                default:
+                    return PropertyValue;
+            }
+        }
+
         public override string ToString()
         {
             return string.Format("{0}->{1}", PropertyName, PropertyValue);
-        }
-
-        public override bool Equals(object obj)
-        {
-            if (Object.ReferenceEquals(this, obj)) return true;
-
-            PropertyField pf = obj as PropertyField;
-            if (pf == null)
-            {
-                return false;
-            }
-
-            return PropertyName == pf.PropertyName && PropertyValue == pf.PropertyValue;
         }
 
         public override int GetHashCode()
@@ -559,40 +681,451 @@ namespace GraphView
 
         public override string ToGraphSON()
         {
-            if (JsonDataType == JsonDataType.String)
-            {
+            if (this.JsonDataType == JsonDataType.String)
                 return string.Format("{{\"{0}\": \"{1}\"}}", PropertyName, PropertyValue);
-            }
-            return string.Format("{{\"{0}\": {1}}}", PropertyName, PropertyValue.ToLower());
+            if (this.JsonDataType == JsonDataType.Boolean)
+                return string.Format("{{\"{0}\": {1}}}", PropertyName, PropertyValue.ToLowerInvariant());
+            return string.Format("{{\"{0}\": {1}}}", PropertyName, PropertyValue);
         }
     }
 
-    internal class VertexPropertyField : PropertyField
+    internal class VertexSinglePropertyField : PropertyField
     {
-        public VertexPropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType) 
-            : base(propertyName, propertyValue, jsonDataType)
+        public readonly Dictionary<string, ValuePropertyField> MetaProperties = new Dictionary<string, ValuePropertyField>();
+
+        public string PropertyId { get; }
+
+        public VertexPropertyField VertexProperty { get; }
+
+
+        public VertexSinglePropertyField(string propertyName, JObject vertexSinglePropertyObject, VertexPropertyField vertexPropertyField) 
+            : base(propertyName, 
+                  vertexSinglePropertyObject["_value"].ToString(), 
+                  JsonDataTypeHelper.GetJsonDataType(vertexSinglePropertyObject["_value"].Type))
         {
+            Debug.Assert(vertexSinglePropertyObject["_propId"] != null);
+
+            this.VertexProperty = vertexPropertyField;
+
+            this.PropertyId = (string)vertexSinglePropertyObject["_propId"];
+            this.Replace(vertexSinglePropertyObject);
+        }
+
+        public VertexSinglePropertyField(VertexSinglePropertyField rhs)
+            :base(rhs.PropertyName, rhs.PropertyValue, rhs.JsonDataType)
+        {
+            this.MetaProperties = rhs.MetaProperties;
+            this.PropertyId = rhs.PropertyId;
+            this.VertexProperty = rhs.VertexProperty;
+        }
+
+        //public void UpdateValue(JValue value)
+        //{
+        //    this.PropertyValue = value.ToString();
+        //    this.JsonDataType = JsonDataTypeHelper.GetJsonDataType(value.Type);
+        //}
+
+        public FieldObject this[string metapropertyName]
+        {
+            get
+            {
+                ValuePropertyField propertyField;
+                this.MetaProperties.TryGetValue(metapropertyName, out propertyField);
+                return propertyField;
+            }
+        }
+
+        public void Replace(JObject vertexSinglePropertyObject)
+        {
+            /* Schema of vertexSinglePropertyObject: 
+                {
+                  "_value": ...,
+                  "_propId": <GUID>
+                  "_meta": { 
+                    "K1": "V1", 
+                    ...
+                  }
+                }
+            */
+            Debug.Assert(vertexSinglePropertyObject["_propId"] != null);
+            Debug.Assert((string)vertexSinglePropertyObject["_propId"] == this.PropertyId);
+
+            JValue value = (JValue) vertexSinglePropertyObject["_value"];
+            this.PropertyValue = value.ToString();
+            this.JsonDataType = JsonDataTypeHelper.GetJsonDataType(value.Type);
+
+            HashSet<string> metaPropertyKeysToRemove = new HashSet<string>(this.MetaProperties.Keys);
+            foreach (JProperty metaProperty in vertexSinglePropertyObject["_meta"].Children<JProperty>()) {
+                ValuePropertyField valueProp;
+                bool found = this.MetaProperties.TryGetValue(metaProperty.Name, out valueProp);
+                if (found) {
+                    valueProp.Replace(metaProperty);
+                    metaPropertyKeysToRemove.Remove(metaProperty.Name);
+                }
+                else {
+                    this.MetaProperties.Add(metaProperty.Name, new ValuePropertyField(metaProperty, this));
+                }
+            }
+
+            // TODO: Whether to remove them?
+            foreach (string metaPropertyToRemove in metaPropertyKeysToRemove) {
+                this.MetaProperties.Remove(metaPropertyToRemove);
+            }
         }
 
         public override string ToString()
         {
             return string.Format("vp[{0}]", base.ToString());
         }
+
+        public override string ToGraphSON()
+        {
+            StringBuilder vpGraphSonBuilder = new StringBuilder();
+            if (this.JsonDataType == JsonDataType.String)
+                vpGraphSonBuilder.AppendFormat("{{\"value\": \"{0}\", \"label\": \"{1}\"", this.PropertyValue, this.PropertyName);
+            else if (this.JsonDataType == JsonDataType.Boolean)
+                vpGraphSonBuilder.AppendFormat("{{\"value\": {0}, \"label\": \"{1}\"", this.PropertyValue.ToLowerInvariant(), this.PropertyName);
+            else
+                vpGraphSonBuilder.AppendFormat("{{\"value\": {0}, \"label\": \"{1}\"", this.PropertyValue, this.PropertyName);
+
+            bool isFirstMetaproperty = true;
+
+            foreach (KeyValuePair<string, ValuePropertyField> kvp in this.MetaProperties)
+            {
+                string key = kvp.Key;
+                ValuePropertyField value = kvp.Value;
+
+                if (isFirstMetaproperty)
+                {
+                    vpGraphSonBuilder.Append(", \"properties\":{");
+                    isFirstMetaproperty = false;
+                }      
+                else
+                    vpGraphSonBuilder.Append(", ");
+
+                if (value.JsonDataType == JsonDataType.String)
+                    vpGraphSonBuilder.AppendFormat("\"{0}\": \"{1}\"", key, value.PropertyValue);
+                else if (value.JsonDataType == JsonDataType.Boolean)
+                    vpGraphSonBuilder.AppendFormat("\"{0}\": {1}", key, value.PropertyValue.ToLowerInvariant());
+                else
+                    vpGraphSonBuilder.AppendFormat("\"{0}\": {1}", key, value.PropertyValue);
+            }
+
+            if (!isFirstMetaproperty)
+                vpGraphSonBuilder.Append("}");
+            
+            vpGraphSonBuilder.Append("}");
+
+            return vpGraphSonBuilder.ToString();
+        }
     }
 
     internal class EdgePropertyField : PropertyField
     {
-        public EdgePropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType) 
+        public EdgeField Edge { get; }
+
+        public EdgePropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType, EdgeField edgeField)
             : base(propertyName, propertyValue, jsonDataType)
         {
+            this.Edge = edgeField;
+        }
+
+        public EdgePropertyField(JProperty property, EdgeField edgeField)
+            : base(property.Name,
+                property.Value.ToString(),
+                JsonDataTypeHelper.GetJsonDataType(property.Value.Type))
+        {
+            Debug.Assert(property.Value is JValue);
+
+            this.Edge = edgeField;
+        }
+
+        public EdgePropertyField(EdgePropertyField rhs)
+            : base(rhs.PropertyName, rhs.PropertyValue, rhs.JsonDataType)
+        {
+            this.Edge = rhs.Edge;
         }
 
         public override string ToString()
         {
             return string.Format("p[{0}]", base.ToString());
         }
+
+        public override string ToGraphSON()
+        {
+            if (this.JsonDataType == JsonDataType.String)
+                return string.Format("{{\"key\":\"{0}\", \"value\":\"{1}\"}}", this.PropertyName, this.PropertyValue);
+            if (this.JsonDataType == JsonDataType.Boolean)
+                return string.Format("{{\"key\":\"{0}\", \"value\":{1}}}", this.PropertyName, this.PropertyValue.ToLowerInvariant());
+            return string.Format("{{\"key\":\"{0}\", \"value\":{1}}}", this.PropertyName, this.PropertyValue);
+        }
+
+        public void Replace(JProperty property)
+        {
+            Debug.Assert(this.PropertyName == property.Name);
+            Debug.Assert(property.Value is JValue);
+            Debug.Assert(((JValue)property.Value).Type != JTokenType.Null);
+
+            this.PropertyValue = ((JValue)property.Value).ToString(CultureInfo.InvariantCulture);
+            this.JsonDataType = JsonDataTypeHelper.GetJsonDataType(property.Value.Type);
+        }
     }
 
+    internal class ValuePropertyField : PropertyField
+    {
+        /// <summary>
+        /// If this is a vertex meta property (id, label, ...), its parent is VertexField
+        /// If this is a vertex-property's meta property, its parent is VertexSinglePropertyField
+        /// </summary>
+        public FieldObject Parent { get; }
+
+        public ValuePropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType, VertexField vertexField)
+            : base(propertyName, propertyValue, jsonDataType)
+        {
+            Debug.Assert(VertexField.IsVertexMetaProperty(propertyName));
+
+            this.Parent = vertexField;
+        }
+
+        public ValuePropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType, VertexSinglePropertyField vertexSingleProperty)
+            : base(propertyName, propertyValue, jsonDataType)
+        {
+            this.Parent = vertexSingleProperty;
+        }
+
+        
+        public ValuePropertyField(JProperty property, VertexField vertexField)
+            : base(property.Name,
+                property.Value.ToString(),
+                JsonDataTypeHelper.GetJsonDataType(property.Value.Type))
+        {
+            Debug.Assert(VertexField.IsVertexMetaProperty(property.Name));
+            Debug.Assert(property.Value is JValue);
+
+            this.Parent = vertexField;
+        }
+
+
+        public ValuePropertyField(JProperty property, VertexSinglePropertyField vertexSingleProperty)
+            : base(property.Name,
+                property.Value.ToString(),
+                JsonDataTypeHelper.GetJsonDataType(property.Value.Type))
+        {
+            Debug.Assert(property.Value is JValue);
+
+            this.Parent = vertexSingleProperty;
+        }
+
+        public ValuePropertyField(ValuePropertyField rhs)
+            : base(rhs.PropertyName, rhs.PropertyValue, rhs.JsonDataType)
+        {
+            this.Parent = rhs.Parent;
+        }
+
+        public override string ToString()
+        {
+            return string.Format("p[{0}]", base.ToString());
+        }
+
+        public override string ToGraphSON()
+        {
+            if (this.JsonDataType == JsonDataType.String)
+                return string.Format("{{\"key\":\"{0}\", \"value\":\"{1}\"}}", this.PropertyName, this.PropertyValue);
+            if (this.JsonDataType == JsonDataType.Boolean)
+                return string.Format("{{\"key\":\"{0}\", \"value\":{1}}}", this.PropertyName, this.PropertyValue.ToLowerInvariant());
+            return string.Format("{{\"key\":\"{0}\", \"value\":{1}}}", this.PropertyName, this.PropertyValue);
+        }
+
+        public void Replace(JProperty property)
+        {
+            Debug.Assert(this.PropertyName == property.Name);
+            Debug.Assert(property.Value is JValue);
+            Debug.Assert(((JValue)property.Value).Type != JTokenType.Null);
+
+            Debug.Assert(this.Parent is VertexSinglePropertyField);
+
+            this.PropertyValue = ((JValue)property.Value).ToString(CultureInfo.InvariantCulture);
+            this.JsonDataType = JsonDataTypeHelper.GetJsonDataType(property.Value.Type);
+        }
+    }
+
+    internal class VertexPropertyField : PropertyField
+    {
+        // <_propId, single_property_field>
+        public Dictionary<string, VertexSinglePropertyField> Multiples { get; } = new Dictionary<string, VertexSinglePropertyField>();
+
+        public VertexField Vertex { get; }
+
+        public override string PropertyValue {
+            get {
+                if (Multiples.Count == 1)
+                    return Multiples.Values.First().PropertyValue;
+                if (Multiples.Count == 0)
+                    return "";
+                Debug.Assert(false, "Should not get here.");
+                return "";
+                //throw new NotSupportedException("Can't get value on a VertexPropertyField with multiple properties");
+            }
+            set {
+                // Do nothing
+            }
+        }
+
+        public override string ToString()
+        {
+            if (this.Multiples.Count == 1)
+                return Multiples.Values.First().ToString();
+            if (this.Multiples.Count == 0)
+                return "";
+            Debug.Assert(false, "Should not get here.");
+            return "";
+            //throw new NotSupportedException("Can't get value on a VertexPropertyField with multiple properties");
+        }
+
+        public override string ToValue {
+            get
+            {
+                if (this.Multiples.Count == 1)
+                    return Multiples.Values.First().ToValue;
+                if (this.Multiples.Count == 0)
+                    return "";
+                Debug.Assert(false, "Should not get here.");
+                return "";
+                //throw new NotSupportedException("Can't get 'ToValue' on a VertexPropertyField");
+            }
+        }
+
+        public override JsonDataType JsonDataType
+        {
+            get
+            {
+                if (this.Multiples.Count == 1)
+                    return Multiples.Values.First().JsonDataType;
+                if (this.Multiples.Count == 0)
+                    return JsonDataType.Null;
+
+                Debug.Assert(false, "Should not get here.");
+                return JsonDataType.String;
+            }
+        }
+
+        //public VertexPropertyField(string propertyName, string propertyValue, JsonDataType jsonDataType)
+        //    : base(propertyName, propertyValue, jsonDataType)
+        //{
+        //}
+
+        public VertexPropertyField(JProperty multiProperty, VertexField vertexField)
+            : base(multiProperty.Name, null, JsonDataType.Array)
+        {
+            this.Replace(multiProperty);
+            this.Vertex = vertexField;
+        }
+
+        public override string ToGraphSON()
+        {
+            StringBuilder vpGraphSonBuilder = new StringBuilder();
+            vpGraphSonBuilder.AppendFormat("\"{0}\":[", this.PropertyName);
+
+            bool isFirstVsp = true;
+            foreach (VertexSinglePropertyField vsp in this.Multiples.Values)
+            {
+                if (isFirstVsp)
+                    isFirstVsp = false;
+                else
+                    vpGraphSonBuilder.Append(", ");
+
+                if (vsp.JsonDataType == JsonDataType.String)
+                    vpGraphSonBuilder.AppendFormat("{{\"value\": \"{0}\"", vsp.PropertyValue);
+                else if (vsp.JsonDataType == JsonDataType.Boolean)
+                    vpGraphSonBuilder.AppendFormat("{{\"value\": {0}", vsp.PropertyValue.ToLowerInvariant());
+                else
+                    vpGraphSonBuilder.AppendFormat("{{\"value\": {0}", vsp.PropertyValue);
+
+                if (vsp.MetaProperties.Count > 0)
+                {
+                    vpGraphSonBuilder.Append(", \"properties\":{");
+                    bool isFirstMetaproperty = true;
+
+                    foreach (KeyValuePair<string, ValuePropertyField> kvp in vsp.MetaProperties)
+                    {
+                        string key = kvp.Key;
+                        ValuePropertyField value = kvp.Value;
+
+                        if (isFirstMetaproperty)
+                            isFirstMetaproperty = false;
+                        else
+                            vpGraphSonBuilder.Append(", ");
+
+                        if (value.JsonDataType == JsonDataType.String)
+                            vpGraphSonBuilder.AppendFormat("\"{0}\": \"{1}\"", key, value.PropertyValue);
+                        else if (value.JsonDataType == JsonDataType.Boolean)
+                            vpGraphSonBuilder.AppendFormat("\"{0}\": {1}", key, value.PropertyValue);
+                        else
+                            vpGraphSonBuilder.AppendFormat("\"{0}\": {1}", key, value.PropertyValue);
+                    }
+                    vpGraphSonBuilder.Append("}");
+                }
+
+                vpGraphSonBuilder.Append("}");
+            }
+
+            vpGraphSonBuilder.Append("]");
+
+            return vpGraphSonBuilder.ToString();
+        }
+
+        public PropertyField ToVertexPropertyFieldIfSingle()
+        {
+            Debug.Assert(this.Multiples.Count > 0);
+            if (this.Multiples.Count == 1) {
+                return this.Multiples.Values.First();
+            }
+            else {
+                return this;
+            }
+        }
+
+
+        public void Replace(JProperty multiProperty)
+        {
+            /* multiProperty looks like: 
+              <propName>: [
+                {
+                  "_value": "Property Value",
+                  "_propId": <GUID>
+                  "_meta": { ... }
+                }, 
+                ...
+              ]
+            */
+            Debug.Assert(multiProperty.Name == this.PropertyName);
+            Debug.Assert(multiProperty.Value is JArray);
+            this.PropertyValue = null;
+            this.JsonDataType = JsonDataType.Array;
+            
+
+            HashSet<string> metaPropIdToRemove = new HashSet<string>(this.Multiples.Keys);
+            foreach (JObject vertexPropertyObject in ((JArray)multiProperty.Value).Values<JObject>()) {
+                Debug.Assert(vertexPropertyObject["_value"] is JValue);
+                Debug.Assert(vertexPropertyObject["_propId"] is JValue);
+                Debug.Assert(vertexPropertyObject["_meta"] is JObject);
+
+                string propId = (string) vertexPropertyObject["_propId"];
+                if (metaPropIdToRemove.Remove(propId)) {
+                    // This single-property should be replaced
+                    this.Multiples[propId].Replace(vertexPropertyObject);
+                }
+                else {
+                    // This single-property is newly added
+                    this.Multiples.Add(propId, new VertexSinglePropertyField(multiProperty.Name, vertexPropertyObject, this));
+                }
+            }
+
+            foreach (string propId in metaPropIdToRemove) {
+                this.Multiples.Remove(propId);
+            }
+        }
+    }
 
     internal class EdgeField : FieldObject
     {
@@ -626,19 +1159,15 @@ namespace GraphView
         }
 
 
-        //TODO: Refactor this code! not elegant!
-        //TODO: Move all vertex/edge cache operations into VertexCache
-        public void UpdateEdgeProperty(string propertyName, string propertyValue, JsonDataType jsonDataType)
+        public void UpdateEdgeProperty(JProperty property, EdgeField edgeField)
         {
             EdgePropertyField propertyField;
-            if (this.EdgeProperties.TryGetValue(propertyName, out propertyField))
-            {
-                propertyField.PropertyValue = propertyValue;
-                propertyField.JsonDataType = jsonDataType;
+            if (this.EdgeProperties.TryGetValue(property.Name, out propertyField)) {
+                propertyField.Replace(property);
             }
-                
-            else
-                this.EdgeProperties.Add(propertyName, new EdgePropertyField(propertyName, propertyValue, jsonDataType));
+            else {
+                this.EdgeProperties.Add(property.Name, new EdgePropertyField(property, this));
+            }
         }
 
         public override string ToString()
@@ -696,13 +1225,14 @@ namespace GraphView
                     sb.Append(", ");
                 }
 
-                if (this.EdgeProperties[propertyName].JsonDataType == JsonDataType.String)
-                {
+                if (this.EdgeProperties[propertyName].JsonDataType == JsonDataType.String) {
                     sb.AppendFormat("\"{0}\": \"{1}\"", propertyName, this.EdgeProperties[propertyName].PropertyValue);
                 }
-                else
-                {
-                    sb.AppendFormat("\"{0}\": {1}", propertyName, this.EdgeProperties[propertyName].PropertyValue.ToLower());
+                else if (this.EdgeProperties[propertyName].JsonDataType == JsonDataType.Boolean) {
+                    sb.AppendFormat("\"{0}\": {1}", propertyName, this.EdgeProperties[propertyName].PropertyValue.ToLowerInvariant());
+                }
+                else {
+                    sb.AppendFormat("\"{0}\": {1}", propertyName, this.EdgeProperties[propertyName].PropertyValue);
                 }
             }
             if (!firstProperty) {
@@ -742,7 +1272,7 @@ namespace GraphView
             };
 
             foreach (JProperty property in edgeObject.Properties()) {
-                edgeField.EdgeProperties.Add(property.Name, GetEdgePropertyField(property));
+                edgeField.EdgeProperties.Add(property.Name, new EdgePropertyField(property, edgeField));
 
                 switch (property.Name) {
                 case "_sinkV": // "_sinkV"
@@ -770,7 +1300,7 @@ namespace GraphView
             };
 
             foreach (JProperty property in edgeObject.Properties()) {
-                edgeField.EdgeProperties.Add(property.Name, GetEdgePropertyField(property));
+                edgeField.EdgeProperties.Add(property.Name, new EdgePropertyField(property, edgeField));
 
                 switch (property.Name) {
                 case "_srcV":
@@ -828,7 +1358,7 @@ namespace GraphView
         {
             StringBuilder sb = new StringBuilder();
 
-            foreach (string offset in Edges.Keys.OrderBy(e => long.Parse(e)))
+            foreach (string offset in Edges.Keys.OrderBy(e => long.Parse(e.Substring(e.IndexOf(".")+1))))
             {
                 if (sb.Length > 0)
                 {
@@ -859,12 +1389,51 @@ namespace GraphView
 
     internal class VertexField : FieldObject
     {
+        public static bool IsVertexMetaProperty(string propertyName)
+        {
+            switch (propertyName) {
+            case "id":
+            case "_partition":
+            case "label":
+            case "_nextEdgeOffset":
+                return true;
+            default:
+                return false;
+            }
+        }
+
         // <Property Name, VertexPropertyField>
-        public Dictionary<string, VertexPropertyField> VertexProperties { get; set; }
+        public Dictionary<string, VertexPropertyField> VertexProperties { get; } = new Dictionary<string, VertexPropertyField>();
+
+        /// <summary>
+        /// [Property Name, ValuePropertyField] (that is, "id", "_nextEdgeOffset", "label", "_partition")
+        /// "_edge" and "_reverse_edge" is not included
+        /// </summary>
+        public Dictionary<string, ValuePropertyField> VertexMetaProperties { get; } = new Dictionary<string, ValuePropertyField>();
+
+        public string VertexId => this.VertexMetaProperties["id"].PropertyValue;
+
+
+        /// <summary>
+        /// Return all the properties of a vertex, they can be:
+        ///  - ValuePropertyField: for reserved properties: id, label, _nextEdgeOffset, _partition (no meta-properties)
+        ///  - VertexSinglePropertyField: for custom properties, single value (may contain meta-properties)
+        ///  - VertexPropertyField: for custom properties, multiple values (may contain meta-properties)
+        /// </summary>
+        public IEnumerable<PropertyField> AllProperties {
+            get {
+                foreach (KeyValuePair<string, ValuePropertyField> pair in this.VertexMetaProperties) {
+                    yield return pair.Value;
+                }
+                foreach (KeyValuePair<string, VertexPropertyField> pair in this.VertexProperties) {
+                    yield return pair.Value.ToVertexPropertyFieldIfSingle();
+                }
+            }
+        }
+
+
         public AdjacencyListField AdjacencyList { get; set; }
         public AdjacencyListField RevAdjacencyList { get; set; }
-
-        public JObject JsonDocument { get; set; }
 
         private GraphViewConnection connection;
 
@@ -872,32 +1441,61 @@ namespace GraphView
         {
             get
             {
+                // "id", "label", "_nextEdgeOffset"
+                if (IsVertexMetaProperty(propertyName))
+                    return this.VertexMetaProperties[propertyName];
+
                 if (propertyName.Equals("*", StringComparison.OrdinalIgnoreCase))
                     return this;
-                else if (propertyName.Equals("_edge", StringComparison.OrdinalIgnoreCase))
+
+                if (propertyName.Equals("_edge", StringComparison.OrdinalIgnoreCase))
                     return AdjacencyList;
-                else if (propertyName.Equals("_reverse_edge", StringComparison.OrdinalIgnoreCase))
+
+                if (propertyName.Equals("_reverse_edge", StringComparison.OrdinalIgnoreCase))
                     return RevAdjacencyList;
-                else
-                {
-                    VertexPropertyField propertyField;
-                    VertexProperties.TryGetValue(propertyName, out propertyField);
-                    return propertyField;
+
+                VertexPropertyField propertyField;
+                bool found = this.VertexProperties.TryGetValue(propertyName, out propertyField);
+                if (!found) {
+                    return null;
                 }
+
+                Debug.Assert(propertyField.Multiples.Count > 0, "Vertex's property must contains at least one value");
+                return propertyField;
+                //if (propertyField.Multiples.Count == 1) {
+                //    Debug.Assert(propertyField.Multiples[0].PropertyName == propertyName);
+                //    return propertyField.Multiples[0];
+                //}
+                //else {
+                //    return propertyField;
+                //}
             }
         }
 
-        public void UpdateVertexProperty(string propertyName, string propertyValue, JsonDataType jsonDataType)
-        {
-            VertexPropertyField propertyField;
-            if (VertexProperties.TryGetValue(propertyName, out propertyField))
-            {
-                propertyField.PropertyValue = propertyValue;
-                propertyField.JsonDataType = jsonDataType;
-            }
-            else
-                VertexProperties.Add(propertyName, new VertexPropertyField(propertyName, propertyValue, jsonDataType));
-        }
+        //[Obsolete]
+        //public void ReplaceProperty(JProperty property)
+        //{
+        //    // Replace
+        //    if (IsVertexMetaProperty(property.Name)) {
+        //        ValuePropertyField valueProp;
+        //        bool found = this.VertexMetaProperties.TryGetValue(property.Name, out valueProp);
+        //        Debug.Assert(found && valueProp != null);
+
+        //        valueProp.Replace(property);
+        //    }
+        //    else {
+        //        VertexPropertyField propertyField;
+        //        if (this.VertexProperties.TryGetValue(property.Name, out propertyField)) {
+        //            propertyField.Replace(property);
+        //        }
+        //        else {
+        //            this.VertexProperties.Add(
+        //                property.Name, 
+        //                new VertexPropertyField(property, this));
+        //        }
+        //    }
+        //}
+
 
         public VertexField(GraphViewConnection connection)
         {
@@ -910,9 +1508,9 @@ namespace GraphView
 
         public override string ToString()
         {
-            VertexPropertyField idProperty;
+            ValuePropertyField idProperty;
             string id;
-            if (VertexProperties.TryGetValue("id", out idProperty))
+            if (VertexMetaProperties.TryGetValue("id", out idProperty))
             {
                 id = idProperty.ToValue;
             }
@@ -927,8 +1525,8 @@ namespace GraphView
         {
             get
             {
-                VertexPropertyField idProperty;
-                if (VertexProperties.TryGetValue("id", out idProperty))
+                ValuePropertyField idProperty;
+                if (VertexMetaProperties.TryGetValue("id", out idProperty))
                 {
                     return idProperty.ToValue;
                 }
@@ -943,13 +1541,13 @@ namespace GraphView
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("{");
-            sb.AppendFormat("\"id\": \"{0}\"", VertexProperties["id"].PropertyValue);
+            sb.AppendFormat("\"id\": \"{0}\"", VertexMetaProperties["id"].PropertyValue);
 
 
-            if (VertexProperties.ContainsKey("label"))
-            {
+            Debug.Assert(VertexMetaProperties.ContainsKey("label"));
+            if (VertexMetaProperties["label"] != null) {
                 sb.Append(", ");
-                sb.AppendFormat("\"label\": \"{0}\"", VertexProperties["label"].PropertyValue);
+                sb.AppendFormat("\"label\": \"{0}\"", VertexMetaProperties["label"].PropertyValue);
             }
 
             sb.Append(", ");
@@ -958,14 +1556,14 @@ namespace GraphView
             if (!connection.UseReverseEdges)
             {
                 RevAdjacencyList = EdgeDocumentHelper.GetReverseAdjacencyListOfVertex(connection,
-                    VertexProperties["id"].PropertyValue);
+                    VertexMetaProperties["id"].PropertyValue);
             }
 
             if (RevAdjacencyList != null && RevAdjacencyList.AllEdges.Any())
             {
                 sb.Append(", \"inE\": {");
                 // Groups incoming edges by their labels
-                var groupByLabel = RevAdjacencyList.AllEdges.GroupBy(e => e["label"].ToValue);
+                var groupByLabel = RevAdjacencyList.AllEdges.GroupBy(e => e.Label);
                 bool firstInEGroup = true;
                 foreach (var g in groupByLabel)
                 {
@@ -1027,13 +1625,20 @@ namespace GraphView
                             if (edgeField.EdgeProperties[propertyName].JsonDataType == JsonDataType.String)
                             {
                                 sb.AppendFormat("\"{0}\": \"{1}\"",
-                                propertyName,
-                                edgeField.EdgeProperties[propertyName].PropertyValue);
-                            } else
+                                    propertyName,
+                                    edgeField.EdgeProperties[propertyName].PropertyValue);
+                            }
+                            else if (edgeField.EdgeProperties[propertyName].JsonDataType == JsonDataType.Boolean)
                             {
                                 sb.AppendFormat("\"{0}\": {1}",
-                                propertyName,
-                                edgeField.EdgeProperties[propertyName].PropertyValue.ToLower());
+                                    propertyName,
+                                    edgeField.EdgeProperties[propertyName].PropertyValue.ToLowerInvariant());
+                            }
+                            else
+                            {
+                                sb.AppendFormat("\"{0}\": {1}",
+                                    propertyName,
+                                    edgeField.EdgeProperties[propertyName].PropertyValue);
                             }
                         }
                         if (!firstInEProperty)
@@ -1051,7 +1656,7 @@ namespace GraphView
             {
                 sb.Append(", \"outE\": {");
                 // Groups outgoing edges by their labels
-                var groupByLabel = AdjacencyList.AllEdges.GroupBy(e => e["label"].ToValue);
+                var groupByLabel = AdjacencyList.AllEdges.GroupBy(e => e.Label);
                 bool firstOutEGroup = true;
                 foreach (var g in groupByLabel)
                 {
@@ -1115,11 +1720,18 @@ namespace GraphView
                                 sb.AppendFormat("\"{0}\": \"{1}\"",
                                 propertyName,
                                 edgeField.EdgeProperties[propertyName].PropertyValue);
-                            } else
+                            }
+                            else if (edgeField.EdgeProperties[propertyName].JsonDataType == JsonDataType.Boolean)
                             {
                                 sb.AppendFormat("\"{0}\": {1}",
                                 propertyName,
-                                edgeField.EdgeProperties[propertyName].PropertyValue.ToLower());
+                                edgeField.EdgeProperties[propertyName].PropertyValue.ToLowerInvariant());
+                            }
+                            else
+                            {
+                                sb.AppendFormat("\"{0}\": {1}",
+                                propertyName,
+                                edgeField.EdgeProperties[propertyName].PropertyValue);
                             }
                         }
                         if (!firstOutEProperty)
@@ -1134,18 +1746,20 @@ namespace GraphView
             }
 
             bool firstVertexProperty = true;
-            foreach (string propertyName in VertexProperties.Keys)
+            foreach (KeyValuePair<string, VertexPropertyField> kvp in VertexProperties)
             {
-                switch (propertyName) {
-                case "id":
-                case "label":
-                case "_partition":
-                case "_edge":
-                case "_reverse_edge":
-                case "_nextEdgeOffset":
-                    continue;
-                default:
-                    break;
+                string propertyName = kvp.Key;
+                switch (propertyName)
+                {
+                    case "id":
+                    case "label":
+                    case "_partition":
+                    case "_edge":
+                    case "_reverse_edge":
+                    case "_nextEdgeOffset":
+                        continue;
+                    default:
+                        break;
                 }
 
                 if (firstVertexProperty)
@@ -1153,25 +1767,15 @@ namespace GraphView
                     sb.Append(", \"properties\": {");
                     firstVertexProperty = false;
                 }
-                else
-                {
+                else {
                     sb.Append(", ");
                 }
 
-                VertexPropertyField vp = VertexProperties[propertyName];
-
-                if (vp.JsonDataType == JsonDataType.String)
-                {
-                    sb.AppendFormat("\"{0}\": [{{\"value\": \"{1}\"}}]", propertyName, vp.PropertyValue);
-
-                }
-                else
-                {
-                    sb.AppendFormat("\"{0}\": [{{\"value\": {1}}}]", propertyName, vp.PropertyValue.ToLower());
-                }
+                VertexPropertyField vp = kvp.Value;
+                sb.Append(vp.ToGraphSON());
             }
-            if (!firstVertexProperty)
-            {
+
+            if (!firstVertexProperty) {
                 sb.Append("}");
             }
 

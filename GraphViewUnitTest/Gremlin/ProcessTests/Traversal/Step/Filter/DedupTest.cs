@@ -23,7 +23,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// dedup(Scope scope, params string[] dedupLabels) is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/36911
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupLocalScope()
         {
@@ -31,16 +30,16 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
             {
                 // TODO: Implement GraphTraversal2 dedup(Scope scope, params string[] dedupLabels)
 
-                //var traversal = GraphViewCommand.g().V()
-                //    .Out()
-                //    .In()
-                //    .Values("name")
-                //    .Fold()
-                //    .Dedup(Scope.local)
-                //    .Unfold();
-                //var result = traversal.Next();
+                var traversal = GraphViewCommand.g().V()
+                    .Out()
+                    .In()
+                    .Values("name")
+                    .Fold()
+                    .Dedup(GremlinKeyword.Scope.local)
+                    .Unfold();
+                var result = traversal.Next();
 
-                //AbstractGremlinTest.CheckUnOrderedResults(new string[] { "marko", "josh", "peter" }, result);
+                AbstractGremlinTest.CheckUnOrderedResults(new string[] { "marko", "josh", "peter" }, result);
             }
         }
 
@@ -53,13 +52,13 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// dedup(Scope scope, params string[] dedupLabels) is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/36911
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupLocalMultipleLabels()
         {
             using (GraphViewCommand GraphViewCommand = new GraphViewCommand(graphConnection))
             {
                 // TODO: Implement GraphTraversal2 dedup(Scope scope, params string[] dedupLabels)
+                Assert.Fail();
 
                 var expected = new List<Dictionary<string, string>>()
                 {
@@ -140,7 +139,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// Dedup().By() does not work
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37139
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupBy()
         {
@@ -169,7 +167,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// by(Function<V, Object> function) is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37143
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupByWithCustomFunction()
         {
@@ -187,6 +184,7 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
                 //var result = traversal.Next();
 
                 //CollectionAssert.AreEqual(new string[] { "josh", "lop", "marko", "peter", "ripple", "vadas" }, result);
+                Assert.Fail();
             }
         }
 
@@ -248,7 +246,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// Dedup().By() does not work
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37139
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupByLabel()
         {
@@ -276,8 +273,8 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// Deserialize fold() result
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37155
         /// </remarks>
-        [Ignore]
         [TestMethod]
+        [Ignore]
         public void DedupInsideBy()
         {
             using (GraphViewCommand GraphViewCommand = new GraphViewCommand(graphConnection))
@@ -310,7 +307,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// Dedup().By() does not work
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37139
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupMultipleLabels()
         {
@@ -343,7 +339,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// GremlinDedupVariable.ToTableReference() is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37160
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupTwoOutOfThreeLabels()
         {
@@ -351,15 +346,18 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
             {
                 // TODO: Implement GremlinDedupVariable.ToTableReference()
                 // TODO: Use graphson to parse result.
+                Assert.Fail();
 
-                //var traversal = GraphViewCommand.g().V()
-                //    .As("a")
-                //    .Out("created")
-                //    .As("b")
-                //    .In("created")
-                //    .As("c")
-                //    .Dedup("a", "b")
-                //    .Path();
+                var traversal = GraphViewCommand.g().V()
+                    .As("a")
+                    .Out("created")
+                    .As("b")
+                    .In("created")
+                    .As("c")
+                    .Dedup("a", "b")
+                    .Path();
+
+                var result = traversal.Next();
                 //IEnumerable<Path> result = traversal.Next();
                 //IEnumerable<string> resultInString = result.Select(p=> string.Format("{0},{1}",p.Get("a").Value("name"), p.Get("b").Value("name"));
 
@@ -379,7 +377,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// GraphTraversal2.By(string key, GremlinKeyword.Order order) is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37166
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupWithOrder()
         {
@@ -388,20 +385,21 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
                 // TODO: GremlinOrderOp.ModulateBy() is not implemented
                 // TODO: GraphTraversal2.By(string key, GremlinKeyword.Order order) is not implemented
 
-                //var traversal = GraphViewCommand.g().V()
-                //    .OutE()
-                //    .As("e")
-                //    .InV()
-                //    .As("v")
-                //    .Select("e")
-                //    .Order()
-                //    .By("weight", Order.Incr)
-                //    .Select("v")
-                //    .Values("name")
-                //    .Dedup();
-                //var result = traversal.Next();
+                var traversal = GraphViewCommand.g().V()
+                    .OutE()
+                    .As("e")
+                    .InV()
+                    .As("v")
+                    .Select("e")
+                    .Order()
+                    .By("weight", GremlinKeyword.Order.Incr)
+                    .Select("v")
+                    .Values("name")
+                    .Dedup();
+                var result = traversal.Next();
 
-                //AbstractGremlinTest.CheckUnOrderedResults(new string[] { "marko", "vadas", "josh", "peter"}, result);
+                //AbstractGremlinTest.CheckUnOrderedResults(new string[] { "marko", "vadas", "josh", "peter" }, result);
+                AbstractGremlinTest.CheckUnOrderedResults(new string[] { "lop", "vadas", "josh", "ripple" }, result);
             }
         }
 
@@ -414,7 +412,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// GremlinOrderOp.ModulateBy() is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37165
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupByAnonymousTraversal()
         {
@@ -449,22 +446,22 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// GroupCount() Not Implemented on GraphTraversal2
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/36609
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupWithGroupCount()
         {
             using (GraphViewCommand GraphViewCommand = new GraphViewCommand(graphConnection))
             {
-                // TODO: GroupCount() Not Implemented on GraphTraversal2
+                Assert.Fail();
+                // TODO: Select("values") Not Implemented on GraphTraversal2
 
-                //var traversal = GraphViewCommand.g().V()
-                //    .GroupCount()
-                //    .Select("values")
-                //    .Unfold()
-                //    .Dedup();
-                //var result = traversal.Next();
+                var traversal = GraphViewCommand.g().V()
+                    .GroupCount()
+                    .Select("values")
+                    .Unfold()
+                    .Dedup();
+                var result = traversal.Next();
 
-                //AbstractGremlinTest.CheckUnOrderedResults(new string[] { "1" }, result);
+                AbstractGremlinTest.CheckUnOrderedResults(new string[] { "1" }, result);
             }
         }
 
@@ -477,7 +474,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// GremlinOrderOp.ModulateBy() is not implemented
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37165
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void TwoDedups()
         {
@@ -516,7 +512,6 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
         /// Repeat(Dedup()) does not work
         /// https://msdata.visualstudio.com/DocumentDB/_workitems/edit/37181
         /// </remarks>
-        [Ignore]
         [TestMethod]
         public void DedupInsideRepeat()
         {
@@ -527,11 +522,11 @@ namespace GraphViewUnitTest.Gremlin.ProcessTests.Traversal.Step.Filter
                 var traversal = GraphViewCommand.g().V()
                     .Repeat(GraphTraversal2.__().Dedup())
                     .Times(2)
-                    .Count();
+                    .Values("name");
 
                 var result = traversal.Next();
 
-                CollectionAssert.AreEqual(new string[] { "josh", "lop", "marko", "peter", "ripple", "vadas" }, result);
+                CheckOrderedResults(new string[] { "marko", "vadas", "lop", "josh", "ripple", "peter" }, result);
             }
         }
     }

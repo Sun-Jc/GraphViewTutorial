@@ -43,21 +43,48 @@ namespace GraphView
             this.comparisonType = comparisonType;
         }
 
+
         public override bool Evaluate(RawRecord record)
         {
-            //string value1 = firstScalarFunction.Evaluate(record);
-            //string value2 = secondScalarFunction.Evaluate(record);
-            string value1 = firstScalarFunction.Evaluate(record)?.ToValue;
-            string value2 = secondScalarFunction.Evaluate(record)?.ToValue;
+            FieldObject lhs = firstScalarFunction.Evaluate(record);
+            FieldObject rhs = secondScalarFunction.Evaluate(record);
 
-            JsonDataType type1 = firstScalarFunction.DataType();
-            JsonDataType type2 = secondScalarFunction.DataType();
-
-            JsonDataType targetType = type1 > type2 ? type1 : type2;
-
-            if (value1 == null || value2 == null)
+            if (lhs == null || rhs == null) {
                 return false;
+            }
 
+            if (lhs is VertexPropertyField)
+            {
+                VertexPropertyField vp = (VertexPropertyField)lhs;
+                foreach (VertexSinglePropertyField vsp in vp.Multiples.Values)
+                {
+                    JsonDataType type1 = vsp.JsonDataType;
+                    JsonDataType type2 = secondScalarFunction.DataType();
+
+                    JsonDataType targetType = type1 > type2 ? type1 : type2;
+
+                    if (Compare(vsp.ToValue, rhs.ToValue, type1, type2, targetType)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            else
+            {
+                JsonDataType type1 = firstScalarFunction.DataType();
+                JsonDataType type2 = secondScalarFunction.DataType();
+
+                JsonDataType targetType = type1 > type2 ? type1 : type2;
+
+                string value1 = firstScalarFunction.Evaluate(record)?.ToValue;
+                string value2 = secondScalarFunction.Evaluate(record)?.ToValue;
+
+                return Compare(value1, value2, type1, type2, targetType);
+            }
+        }
+
+        private bool Compare(string value1, string value2, JsonDataType type1, JsonDataType type2, JsonDataType targetType)
+        {
             switch (targetType)
             {
                 case JsonDataType.Boolean:
@@ -77,8 +104,9 @@ namespace GraphView
                     }
                     else
                     {
-                        throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"boolean\"",
-                            value1, value2));
+                        return false;
+                        //throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"boolean\"",
+                        //    value1, value2));
                     }
                 case JsonDataType.Bytes:
                     switch (comparisonType)
@@ -89,7 +117,8 @@ namespace GraphView
                         case BooleanComparisonType.NotEqualToExclamation:
                             return value1 != value2;
                         default:
-                            throw new NotImplementedException();
+                            return false;
+                            //throw new NotImplementedException();
                     }
                 case JsonDataType.Int:
                     int int_value1, int_value2;
@@ -120,8 +149,9 @@ namespace GraphView
                     }
                     else
                     {
-                        throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"int\"",
-                            value1, value2));
+                        return false;
+                        //throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"int\"",
+                        //    value1, value2));
                     }
                 case JsonDataType.Long:
                     long long_value1, long_value2;
@@ -152,8 +182,9 @@ namespace GraphView
                     }
                     else
                     {
-                        throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"long\"",
-                            value1, value2));
+                        return false;
+                        //throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"long\"",
+                        //    value1, value2));
                     }
                 case JsonDataType.Double:
                     double double_value1, double_value2;
@@ -184,8 +215,9 @@ namespace GraphView
                     }
                     else
                     {
-                        throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"double\"",
-                            value1, value2));
+                        return false;
+                        //throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"double\"",
+                        //    value1, value2));
                     }
                 case JsonDataType.Float:
                     float float_value1, float_value2;
@@ -216,8 +248,9 @@ namespace GraphView
                     }
                     else
                     {
-                        throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"float\"",
-                            value1, value2));
+                        return false;
+                        //throw new QueryCompilationException(string.Format("Cannot cast \"{0}\" or \"{1}\" to values of type \"float\"",
+                        //    value1, value2));
                     }
                 case JsonDataType.String:
                     switch (comparisonType)

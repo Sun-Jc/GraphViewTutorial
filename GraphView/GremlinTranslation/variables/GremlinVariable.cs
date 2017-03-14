@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -7,28 +8,13 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace GraphView
 {
-    internal interface ISqlStatement
-    {
-        List<WSqlStatement> ToSetVariableStatements();
-    }
-    internal interface ISqlTable
-    {
-        WTableReference ToTableReference(List<string> projectProperties, string tableName, GremlinVariable gremlinVariable);
-    }
-
-    internal interface ISqlScalar
-    {
-        WScalarExpression ToScalarExpression();
-    }
-
-    internal interface ISqlBoolean { }
-
     internal enum GremlinVariableType
     {
         Vertex,
         Edge,
         Scalar,
         Table,
+        VertexProperty,
         Property,
         NULL,
         Undefined
@@ -36,21 +22,13 @@ namespace GraphView
      
     internal abstract class GremlinVariable
     {
-        protected string _variableName;
-        public int Low { get; set; }
-        public int High { get; set; }
-        public bool IsReverse { get; set; }
-        public bool IsLocal { get; set; }
+        protected string variableName;
         public List<string> Labels { get; set; }
         public GremlinToSqlContext HomeContext { get; set; }
         public List<string> ProjectedProperties { get; set; }
 
         public GremlinVariable()
         {
-            Low = Int32.MinValue;
-            High = Int32.MaxValue;
-            IsReverse = false;
-            IsLocal = false;
             Labels = new List<string>();
             ProjectedProperties = new List<string>();
         }
@@ -61,11 +39,6 @@ namespace GraphView
         }
 
         internal virtual GremlinVariableType GetVariableType()
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual WEdgeType GetEdgeType()
         {
             throw new NotImplementedException();
         }
@@ -87,15 +60,10 @@ namespace GraphView
             return new GremlinVariableProperty(this, property);
         }
 
-        internal virtual GremlinTableVariable CreateAdjVertex(GremlinVariableProperty propertyVariable)
-        {
-            return new GremlinBoundVertexVariable(GetEdgeType(), propertyVariable);
-        }
-
         internal virtual string GetVariableName()
         {
-            if (_variableName == null) throw new Exception("_variable can't be null");
-            return _variableName;
+            if (variableName == null) throw new Exception("_variable can't be null");
+            return variableName;
         }
 
         internal virtual void BottomUpPopulate(GremlinVariable terminateVariable, string property, string columnName)
@@ -113,32 +81,38 @@ namespace GraphView
             HomeContext.HomeVariable.BottomUpPopulate(terminateVariable, columnName, columnName);
         }
 
-        internal virtual void PopulateGremlinPath() {}
-
         internal virtual List<GremlinVariable> PopulateAllTaggedVariable(string label)
         {
             if (Labels.Contains(label)) return new List<GremlinVariable>() {this};
             return new List<GremlinVariable>();
         }
 
+        /// <summary>
+        /// //This function is used for the algorithm of Repeat Step 
+        /// </summary>
+        /// <returns></returns>
         internal virtual List<GremlinVariable> FetchVarsFromCurrAndChildContext()
         {
+            
             return null;
         }
 
-        internal virtual GremlinVariableProperty GetPath()
+        internal virtual GremlinPathStepVariable GetAndPopulatePath()
         {
-            return DefaultProjection();
+            return new GremlinPathStepVariable(this);
         }
 
         internal virtual GremlinVariableProperty DefaultVariableProperty()
         {
-            throw new NotImplementedException();
-        }
-
-        internal virtual string GetPrimaryKey()
-        {
-            throw new NotImplementedException();
+            switch (GetVariableType())
+            {
+                case GremlinVariableType.Edge:
+                    return GetVariableProperty(GremlinKeyword.EdgeID);
+                case GremlinVariableType.Vertex:
+                    return GetVariableProperty(GremlinKeyword.NodeID);
+                default:
+                    return GetVariableProperty(GremlinKeyword.TableDefaultColumnName);
+            }
         }
 
         internal virtual string GetProjectKey()
@@ -148,21 +122,39 @@ namespace GraphView
 
         internal virtual GremlinVariableProperty DefaultProjection()
         {
-            throw new NotImplementedException();
+            switch (GetVariableType())
+            {
+                case GremlinVariableType.Edge:
+                case GremlinVariableType.Vertex:
+                    return GetVariableProperty(GremlinKeyword.Star);
+                default:
+                    return GetVariableProperty(GremlinKeyword.TableDefaultColumnName);
+            }
         }
 
         internal virtual WFunctionCall ToCompose1()
         {
             List<WScalarExpression> parameters = new List<WScalarExpression>();
-            var projectKey = GetProjectKey();
-            parameters.Add(SqlUtil.GetValueExpr(projectKey));
+            parameters.Add(SqlUtil.GetValueExpr(GetProjectKey()));
             foreach (var projectProperty in ProjectedProperties)
             {
-                parameters.Add(GetVariableProperty(projectProperty).ToScalarExpression());
-                parameters.Add(SqlUtil.GetValueExpr(projectProperty));
+                if (projectProperty == GremlinKeyword.TableDefaultColumnName)
+                {
+                    parameters.Add(DefaultProjection().ToScalarExpression());
+                    parameters.Add(SqlUtil.GetValueExpr(GremlinKeyword.TableDefaultColumnName));
+                }
+                else
+                {
+                    parameters.Add(GetVariableProperty(projectProperty).ToScalarExpression());
+                    parameters.Add(SqlUtil.GetValueExpr(projectProperty));
+                }
             }
             return SqlUtil.GetFunctionCall(GremlinKeyword.func.Compose1, parameters);
         }
+
+        /// <summary>
+        /// Step Funtions
+        /// </summary>
 
         internal virtual void AddE(GremlinToSqlContext currentContext, string edgeLabel)
         {
@@ -172,7 +164,7 @@ namespace GraphView
             currentContext.SetPivotVariable(newTableVariable);
         }
 
-        internal virtual void AddV(GremlinToSqlContext currentContext, string vertexLabel, List<object> propertyKeyValues)
+        internal virtual void AddV(GremlinToSqlContext currentContext, string vertexLabel, List<GremlinProperty> propertyKeyValues)
         {
             GremlinAddVVariable newVariable = new GremlinAddVVariable(vertexLabel, propertyKeyValues);
             currentContext.VariableList.Add(newVariable);
@@ -199,40 +191,60 @@ namespace GraphView
 
         internal virtual void As(GremlinToSqlContext currentContext, List<string> labels)
         {
+            //TODO: when current step is a sideEffect step, we should add label to the last step
             foreach (var label in labels)
             {
                 currentContext.PivotVariable.Labels.Add(label);
             }
         }
-        //internal virtual void barrier()
 
         internal virtual void Both(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new QueryCompilationException("The Both() step only applies to vertices.");
-        }
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjReverseEdge = GetVariableProperty(GremlinKeyword.ReverseEdgeAdj);
+            GremlinVariableProperty adjEdge = GetVariableProperty(GremlinKeyword.EdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable bothEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty,
+                                                                             adjEdge,
+                                                                             adjReverseEdge,
+                                                                             labelProperty,
+                                                                             WEdgeType.BothEdge);
+            currentContext.VariableList.Add(bothEdgeTable);
+            currentContext.TableReferences.Add(bothEdgeTable);
+            currentContext.AddLabelPredicateForEdge(bothEdgeTable, edgeLabels);
 
+            GremlinVariableProperty otherProperty = bothEdgeTable.GetVariableProperty(GremlinKeyword.EdgeOtherV);
+            GremlinBoundVertexVariable otherVertex = new GremlinBoundVertexVariable(otherProperty);
+            currentContext.VariableList.Add(otherVertex);
+            currentContext.TableReferences.Add(otherVertex);
+            currentContext.SetPivotVariable(otherVertex);
+        }
 
         internal virtual void BothE(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new NotImplementedException();
-        }
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjReverseEdge = GetVariableProperty(GremlinKeyword.ReverseEdgeAdj);
+            GremlinVariableProperty adjEdge = GetVariableProperty(GremlinKeyword.EdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable bothEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty, adjEdge, adjReverseEdge, labelProperty,
+                WEdgeType.BothEdge);
+            currentContext.VariableList.Add(bothEdgeTable);
+            currentContext.TableReferences.Add(bothEdgeTable);
+            currentContext.AddLabelPredicateForEdge(bothEdgeTable, edgeLabels);
 
+            currentContext.SetPivotVariable(bothEdgeTable);
+        }
 
         internal virtual void BothV(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
-        }
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.EdgeSourceV);
+            GremlinVariableProperty sinkProperty = GetVariableProperty(GremlinKeyword.EdgeSinkV);
+            GremlinBoundVertexVariable bothVertex = new GremlinBoundVertexVariable(sourceProperty, sinkProperty);
 
-        //internal virtual void By(GremlinToSqlContext currentContext)
-        //internal virtual void By(GremlinToSqlContext currentContext, string name)
-        //internal virtual void by(GremlinToSqlContext currentContext, Comparator<E> comparator)
-        //internal virtual void by(GremlinToSqlContext currentContext, Function<U, Object> function, Comparator comparator)
-        //internal virtual void by(GremlinToSqlContext currentContext, Function<V, Object> function)
-        //internal virtual void By(GremlinToSqlContext currentContext, GremlinKeyword.Order order)
-        //internal virtual void by(GremlinToSqlContext currentContext, string key, Comparator<V> comparator)
-        //internal virtual void by(GremlinToSqlContext currentContext, T token)
-        //internal virtual void By(GremlinToSqlContext currentContext, GraphTraversal2 byContext)
-        //internal virtual void by(GremlinToSqlContext currentContext, GremlinToSqlContext<?, ?> byContext, Comparator comparator)
+            currentContext.VariableList.Add(bothVertex);
+            currentContext.TableReferences.Add(bothVertex);
+            currentContext.SetPivotVariable(bothVertex);
+        }
 
         internal virtual void Cap(GremlinToSqlContext currentContext, List<string> sideEffectKeys)
         {
@@ -243,12 +255,11 @@ namespace GraphView
             currentContext.SetPivotVariable(newVariable);
         }
 
-        //internal virtual void Choose(Function<E, M> choiceFunction)
-
         internal virtual void Choose(GremlinToSqlContext currentContext, Predicate choosePredicate, GremlinToSqlContext trueChoice, GremlinToSqlContext falseChoice)
         {
             throw new NotImplementedException();
         }
+
         internal virtual void Choose(GremlinToSqlContext currentContext, GremlinToSqlContext predicateContext, GremlinToSqlContext trueChoice, GremlinToSqlContext falseChoice)
         {
             throw new NotImplementedException();
@@ -261,7 +272,7 @@ namespace GraphView
 
         internal virtual void Coalesce(GremlinToSqlContext currentContext, List<GremlinToSqlContext> coalesceContextList)
         {
-            GremlinTableVariable newVariable = GremlinCoalesceVariable.Create(coalesceContextList);
+            GremlinCoalesceVariable newVariable = new GremlinCoalesceVariable(coalesceContextList, GremlinUtil.GetContextListType(coalesceContextList));
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             currentContext.SetPivotVariable(newVariable);
@@ -299,30 +310,37 @@ namespace GraphView
             currentContext.SetPivotVariable(newVariable);
         }
 
-
-        //internal virtual void cyclicPath(GremlinToSqlContext currentContext)
-        //internal virtual void dedup(GremlinToSqlContext currentContext, Scope scope, params string[] dedupLabels)
-
-        internal virtual void Dedup(GremlinToSqlContext currentContext, List<string> dedupLabels)
+        internal virtual void CyclicPath(GremlinToSqlContext currentContext)
         {
-            GremlinDedupVariable newVariable = new GremlinDedupVariable(this, dedupLabels);
+            GremlinCyclicPathVariable newVariable = new GremlinCyclicPathVariable(generatePath(currentContext));
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+        }
+
+        internal virtual void Dedup(GremlinToSqlContext currentContext, List<string> dedupLabels, GremlinToSqlContext dedupContext, GremlinKeyword.Scope scope)
+        {
+            List<GremlinVariable> dedupVariables = new List<GremlinVariable>();
+            foreach (var dedupLabel in dedupLabels)
+            {
+                dedupVariables.Add(currentContext.Select(dedupLabel).Last());
+            }
+
+            GremlinDedupVariable newVariable = new GremlinDedupVariable(this, dedupVariables, dedupContext, scope);
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
         }
 
         internal virtual void Drop(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void E(GremlinToSqlContext currentContext)
-        {
-            throw new NotImplementedException();
+            GremlinDropVariable dropVariable = new GremlinDropVariable(this);
+            currentContext.VariableList.Add(dropVariable);
+            currentContext.TableReferences.Add(dropVariable);
+            currentContext.SetPivotVariable(dropVariable);
         }
 
         internal virtual void FlatMap(GremlinToSqlContext currentContext, GremlinToSqlContext flatMapContext)
         {
-            GremlinTableVariable flatMapVariable = GremlinFlatMapVariable.Create(flatMapContext);
+            GremlinFlatMapVariable flatMapVariable = new GremlinFlatMapVariable(flatMapContext, flatMapContext.PivotVariable.GetVariableType());
             currentContext.VariableList.Add(flatMapVariable);
             currentContext.TableReferences.Add(flatMapVariable);
             currentContext.SetPivotVariable(flatMapVariable);
@@ -337,21 +355,10 @@ namespace GraphView
             currentContext.SetPivotVariable(newVariable);
         }
 
-        //internal virtual void fold(E2 seed, BiFuntion<E2, E, E2> foldFunction)
-
-        internal virtual void From(GremlinToSqlContext currentContext, string fromGremlinTranslationOperatorLabel)
+        internal virtual void Group(GremlinToSqlContext currentContext, string sideEffectKey, GremlinToSqlContext groupByContext,
+            GremlinToSqlContext projectByContext, bool isProjectingACollection)
         {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void From(GremlinToSqlContext currentContext, GremlinToSqlContext fromVertexContext)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void Group(GremlinToSqlContext currentContext, string sideEffectKey, List<object> parameters)
-        {
-            GremlinGroupVariable newVariable = new GremlinGroupVariable(this, sideEffectKey, parameters);
+            GremlinGroupVariable newVariable = new GremlinGroupVariable(this, sideEffectKey, groupByContext, projectByContext, isProjectingACollection);
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             if (sideEffectKey == null)
@@ -360,92 +367,108 @@ namespace GraphView
             }
         }
 
-        //internal virtual void groupCount()
-        //internal virtual void groupCount(string sideEffectKey)
-
         internal virtual void Has(GremlinToSqlContext currentContext, string propertyKey)
         {
-            throw new QueryCompilationException("The Has(propertyKey) step only applies to vertices and edges.");
-        }
-
-        internal virtual void Has(GremlinToSqlContext currentContext, string propertyKey, object value)
-        {
-            throw new QueryCompilationException("The Has(key,value) step only applies to vertices and edges.");
-        }
-
-        internal virtual void Has(GremlinToSqlContext currentContext, string label, string propertyKey, object value)
-        {
-            throw new QueryCompilationException("The Has(label, key,value) step only applies to vertices and edges.");
-        }
-
-        internal virtual void Has(GremlinToSqlContext currentContext, string propertyKey, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void Has(GremlinToSqlContext currentContext, string label, string propertyKey, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void Has(GremlinToSqlContext currentContext, string propertyKey, GremlinToSqlContext propertyContext)
-        {
-            throw new QueryCompilationException("The Has(propertyKey, traversal) step only applies to vertices and edges.");
-        }
-
-        internal virtual void HasId(GremlinToSqlContext currentContext, List<object> values)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void HasId(GremlinToSqlContext currentContext, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void HasLabel(GremlinToSqlContext currentContext, List<object> values)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void HasLabel(GremlinToSqlContext currentContext, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to vertices and edges.");
-        }
-
-        internal virtual void HasKey(GremlinToSqlContext currentContext, List<string> values)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to properties.");
-        }
-
-        internal virtual void HasKey(GremlinToSqlContext currentContext, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to properties.");
-        }
-
-        internal virtual void HasValue(GremlinToSqlContext currentContext, List<object> values)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to properties.");
-        }
-
-        internal virtual void HasValue(GremlinToSqlContext currentContext, Predicate predicate)
-        {
-            throw new QueryCompilationException("The Has(key, predicate) step only applies to properties.");
+            GraphTraversal2 traversal2 = GraphTraversal2.__().Properties(propertyKey);
+            traversal2.GetStartOp().InheritedVariableFromParent(currentContext);
+            currentContext.AddPredicate(SqlUtil.GetExistPredicate(traversal2.GetEndOp().GetContext().ToSelectQueryBlock()));
         }
 
         internal virtual void HasNot(GremlinToSqlContext currentContext, string propertyKey)
         {
-            throw new QueryCompilationException("The HasNot(propertyKey) step only applies to vertices and edges.");
+            GraphTraversal2 traversal2 = GraphTraversal2.__().Properties(propertyKey);
+            traversal2.GetStartOp().InheritedVariableFromParent(currentContext);
+            currentContext.AddPredicate(SqlUtil.GetNotExistPredicate(traversal2.GetEndOp().GetContext().ToSelectQueryBlock()));
+        }
+
+        private WBooleanExpression CreateBooleanExpression(GremlinVariableProperty variableProperty, object valuesOrPredicate)
+        {
+            if (valuesOrPredicate is string || valuesOrPredicate is int || valuesOrPredicate is bool)
+            {
+                WScalarExpression firstExpr = variableProperty.ToScalarExpression();
+                WScalarExpression secondExpr = SqlUtil.GetValueExpr(valuesOrPredicate);
+                return SqlUtil.GetEqualBooleanComparisonExpr(firstExpr, secondExpr);
+            }
+            if (valuesOrPredicate is Predicate)
+            {
+                WScalarExpression firstExpr = variableProperty.ToScalarExpression();
+                WScalarExpression secondExpr = SqlUtil.GetValueExpr((valuesOrPredicate as Predicate).Value);
+                return SqlUtil.GetBooleanComparisonExpr(firstExpr, secondExpr, valuesOrPredicate as Predicate);
+            }
+            throw new ArgumentException();
+        }
+
+        internal virtual void Has(GremlinToSqlContext currentContext, string propertyKey, object valuesOrPredicate)
+        {
+            currentContext.AddPredicate(CreateBooleanExpression(GetVariableProperty(propertyKey), valuesOrPredicate));
+        }
+
+        internal virtual void HasIdOrLabel(GremlinToSqlContext currentContext, GremlinHasType hasType, List<object> valuesOrPredicates)
+        {
+            GremlinVariableProperty variableProperty = hasType == GremlinHasType.HasId
+                ? DefaultVariableProperty()
+                : GetVariableProperty(GremlinKeyword.Label);
+            List <WBooleanExpression> booleanExprList = new List<WBooleanExpression>();
+            foreach (var valuesOrPredicate in valuesOrPredicates)
+            {
+                booleanExprList.Add(CreateBooleanExpression(variableProperty, valuesOrPredicate));
+            }
+            currentContext.AddPredicate(SqlUtil.ConcatBooleanExprWithOr(booleanExprList));
+        }
+
+        /// <summary>
+        /// Only valid for VertexProperty
+        /// </summary>
+        internal virtual void HasKeyOrValue(GremlinToSqlContext currentContext, GremlinHasType hasType, List<object> valuesOrPredicates)
+        {
+            GraphTraversal2 traversal2 = hasType == GremlinHasType.HasKey ? GraphTraversal2.__().Key() : GraphTraversal2.__().Value();
+            traversal2.GetStartOp().InheritedVariableFromParent(currentContext);
+            GremlinToSqlContext existContext = traversal2.GetEndOp().GetContext();
+
+            List<WBooleanExpression> booleanExprList = new List<WBooleanExpression>();
+            GremlinVariableProperty defaultVariableProperty = existContext.PivotVariable.DefaultProjection();
+            foreach (var valuesOrPredicate in valuesOrPredicates)
+            {
+                booleanExprList.Add(CreateBooleanExpression(defaultVariableProperty, valuesOrPredicate));
+            }
+            existContext.AddPredicate(SqlUtil.ConcatBooleanExprWithOr(booleanExprList));
+
+            currentContext.AddPredicate(SqlUtil.GetExistPredicate(existContext.ToSelectQueryBlock()));
         }
 
         internal virtual void In(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new NotImplementedException();
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjReverseEdge = GetVariableProperty(GremlinKeyword.ReverseEdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable inEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty, adjReverseEdge,
+                labelProperty, WEdgeType.InEdge);
+            currentContext.VariableList.Add(inEdgeTable);
+            currentContext.TableReferences.Add(inEdgeTable);
+            currentContext.AddLabelPredicateForEdge(inEdgeTable, edgeLabels);
+
+            GremlinVariableProperty edgeProperty = inEdgeTable.GetVariableProperty(GremlinKeyword.EdgeSourceV);
+            GremlinBoundVertexVariable outVertex = new GremlinBoundVertexVariable(edgeProperty);
+            currentContext.VariableList.Add(outVertex);
+            currentContext.TableReferences.Add(outVertex);
+
+            //currentContext.PathList.Add(new GremlinMatchPath(outVertex, inEdgeTable, this));
+
+            currentContext.SetPivotVariable(outVertex);
         }
 
         internal virtual void InE(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new NotImplementedException();
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjReverseEdge = GetVariableProperty(GremlinKeyword.ReverseEdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable inEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty, adjReverseEdge, labelProperty, WEdgeType.InEdge);
+            currentContext.VariableList.Add(inEdgeTable);
+            currentContext.TableReferences.Add(inEdgeTable);
+            currentContext.AddLabelPredicateForEdge(inEdgeTable, edgeLabels);
+
+            //currentContext.PathList.Add(new GremlinMatchPath(null, inEdgeTable, this));
+            currentContext.SetPivotVariable(inEdgeTable);
         }
 
         internal virtual void Inject(GremlinToSqlContext currentContext, List<object> values)
@@ -457,7 +480,11 @@ namespace GraphView
 
         internal virtual void InV(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
+            GremlinVariableProperty sinkProperty = GetVariableProperty(GremlinKeyword.EdgeSinkV);
+            GremlinTableVariable inVertex = new GremlinBoundVertexVariable(sinkProperty);
+            currentContext.VariableList.Add(inVertex);
+            currentContext.TableReferences.Add(inVertex);
+            currentContext.SetPivotVariable(inVertex);
         }
 
         internal virtual void Is(GremlinToSqlContext currentContext, object value)
@@ -475,25 +502,24 @@ namespace GraphView
             currentContext.AddPredicate(booleanExpr);
         }
 
-        internal virtual void Iterate(GremlinToSqlContext currentContext)
-        {
-            throw new NotImplementedException();
-        }
-
         internal virtual void Key(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
+            GremlinKeyVariable newVariable = new GremlinKeyVariable(DefaultVariableProperty());
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
         internal virtual void Local(GremlinToSqlContext currentContext, GremlinToSqlContext localContext)
         {
-            GremlinTableVariable localMapVariable = GremlinLocalVariable.Create(localContext);
+            GremlinLocalVariable localMapVariable = new GremlinLocalVariable(localContext, localContext.PivotVariable.GetVariableType());
             currentContext.VariableList.Add(localMapVariable);
             currentContext.VariableList.AddRange(localContext.VariableList);
 
             currentContext.TableReferences.Add(localMapVariable);
             currentContext.SetPivotVariable(localMapVariable);
         }
+
         //internal virtual void Loops(GremlinToSqlContext currentContext, )
         //internal virtual void MapKeys() //Deprecated
         //internal virtual void Mapvalues(GremlinToSqlContext currentContext, ) //Deprecated
@@ -506,7 +532,7 @@ namespace GraphView
         internal virtual void Map(GremlinToSqlContext currentContext, GremlinToSqlContext mapContext)
         {
 
-            GremlinTableVariable mapVariable = GremlinMapVariable.Create(mapContext);
+            GremlinMapVariable mapVariable = new GremlinMapVariable(mapContext, mapContext.PivotVariable.GetVariableType());
             currentContext.VariableList.Add(mapVariable);
             currentContext.TableReferences.Add(mapVariable);
             currentContext.SetPivotVariable(mapVariable);
@@ -569,14 +595,12 @@ namespace GraphView
             currentContext.AddPredicate(booleanExpr);
         }
 
-        internal virtual void Option(GremlinToSqlContext currentContext, object pickToken, GremlinToSqlContext optionContext)
-        {
-            throw new NotImplementedException();
-        }
-
         internal virtual void Optional(GremlinToSqlContext currentContext, GremlinToSqlContext optionalContext)
         {
-            GremlinTableVariable newVariable = GremlinOptionalVariable.Create(this, optionalContext);
+            GremlinVariableType variableType = GetVariableType() == optionalContext.PivotVariable.GetVariableType()
+                ? GetVariableType()
+                : GremlinVariableType.Table;
+            GremlinOptionalVariable newVariable = new GremlinOptionalVariable(this, optionalContext, variableType);
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             currentContext.SetPivotVariable(newVariable);
@@ -592,46 +616,97 @@ namespace GraphView
             currentContext.AddPredicate(SqlUtil.ConcatBooleanExprWithOr(booleanExprList));
         }
 
-        internal virtual void Order(GremlinToSqlContext currentContext)
+        internal virtual void Order(GremlinToSqlContext currentContext, List<Tuple<object, IComparer>> byModulatingMap, GremlinKeyword.Scope scope)
         {
-            throw new NotImplementedException();
+            GremlinOrderVariable newVariable = new GremlinOrderVariable(this, byModulatingMap, scope);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
         }
-        //internal virtual void order(Scope scope)
 
         internal virtual void OtherV(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
+            GremlinVariableProperty otherProperty = GetVariableProperty(GremlinKeyword.EdgeOtherV);
+            GremlinBoundVertexVariable otherVertex = new GremlinBoundVertexVariable(otherProperty);
+            currentContext.VariableList.Add(otherVertex);
+            currentContext.TableReferences.Add(otherVertex);
+            currentContext.SetPivotVariable(otherVertex);
         }
 
         internal virtual void Out(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new QueryCompilationException("The OutV() step can only be applied to vertex.");
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjEdge = GetVariableProperty(GremlinKeyword.EdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable outEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty, adjEdge, labelProperty, WEdgeType.OutEdge);
+            currentContext.VariableList.Add(outEdgeTable);
+            currentContext.TableReferences.Add(outEdgeTable);
+            currentContext.AddLabelPredicateForEdge(outEdgeTable, edgeLabels);
+
+            GremlinVariableProperty sinkProperty = outEdgeTable.GetVariableProperty(GremlinKeyword.EdgeSinkV);
+            GremlinBoundVertexVariable inVertex = new GremlinBoundVertexVariable(sinkProperty);
+            currentContext.VariableList.Add(inVertex);
+            currentContext.TableReferences.Add(inVertex);
+
+            //currentContext.PathList.Add(new GremlinMatchPath(this, outEdgeTable, inVertex));
+
+            currentContext.SetPivotVariable(inVertex);
         }
 
         internal virtual void OutE(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
-            throw new NotImplementedException();
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
+            GremlinVariableProperty adjEdge = GetVariableProperty(GremlinKeyword.EdgeAdj);
+            GremlinVariableProperty labelProperty = GetVariableProperty(GremlinKeyword.Label);
+            GremlinBoundEdgeTableVariable outEdgeTable = new GremlinBoundEdgeTableVariable(sourceProperty, adjEdge, labelProperty, WEdgeType.OutEdge);
+            currentContext.VariableList.Add(outEdgeTable);
+            currentContext.TableReferences.Add(outEdgeTable);
+            currentContext.AddLabelPredicateForEdge(outEdgeTable, edgeLabels);
+
+            //currentContext.PathList.Add(new GremlinMatchPath(this, outEdgeTable, null));
+            currentContext.SetPivotVariable(outEdgeTable);
         }
 
         internal virtual void OutV(GremlinToSqlContext currentContext)
         {
-            throw new QueryCompilationException("The OutV() step can only be applied to edges.");
+            GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.EdgeSourceV);
+            GremlinTableVariable outVertex = new GremlinBoundVertexVariable(sourceProperty);
+            currentContext.VariableList.Add(outVertex);
+            currentContext.TableReferences.Add(outVertex);
+            currentContext.SetPivotVariable(outVertex);
         }
 
-        //internal virtual void PageRank()
-        //internal virtual void PageRank(double alpha)
-        internal virtual void Path(GremlinToSqlContext currentContext)
+        private GremlinPathVariable generatePath(GremlinToSqlContext currentContext, List<GraphTraversal2> byList = null)
         {
-            GremlinPathVariable newVariable = new GremlinPathVariable(currentContext.GetGremlinStepList());
+            List<GremlinToSqlContext> byContexts = new List<GremlinToSqlContext>();
+            List<GremlinPathStepVariable> steps = currentContext.GetGremlinStepList();
+            if (byList == null)
+            {
+                byList = new List<GraphTraversal2> {GraphTraversal2.__()};
+            }
+
+            foreach (var by in byList)
+            {
+                GremlinToSqlContext newContext = new GremlinToSqlContext();
+                GremlinDecompose1Variable decompose1 = new GremlinDecompose1Variable(steps);
+                newContext.VariableList.Add(decompose1);
+                newContext.TableReferences.Add(decompose1);
+                newContext.SetPivotVariable(decompose1);
+
+                by.GetStartOp().InheritedContextFromParent(newContext);
+                byContexts.Add(by.GetEndOp().GetContext());
+            }
+
+            GremlinPathVariable newVariable = new GremlinPathVariable(steps, byContexts);
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
-            currentContext.SetPivotVariable(newVariable);
+
+            return newVariable;
         }
 
-        //internal virtual void PeerPressure()
-        //internal virtual void Profile()
-        //internal virtual void Profile(string sideEffectKey)
-        //internal virtual void Program(VertexProgram<?> vertexProgram)
+        internal virtual void Path(GremlinToSqlContext currentContext, List<GraphTraversal2> byList)
+        {
+            currentContext.SetPivotVariable(generatePath(currentContext, byList));
+        }
 
         internal virtual void Project(GremlinToSqlContext currentContext, List<string> projectKeys, List<GremlinToSqlContext> byContexts)
         {
@@ -643,54 +718,30 @@ namespace GraphView
 
         internal virtual void Properties(GremlinToSqlContext currentContext, List<string> propertyKeys)
         {
-            throw new QueryCompilationException("The OutV() step can only be applied to edges or vertex.");
+            GremlinPropertiesVariable newVariable = new GremlinPropertiesVariable(this, propertyKeys);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
-        internal virtual void Property(GremlinToSqlContext currentContext, List<object> properties)
+        internal virtual void Property(GremlinToSqlContext currentContext, GremlinProperty vertexProperty)
         {
-            GremlinUpdatePropertiesVariable updateVariable;
-            switch (GetVariableType())
+            GremlinUpdatePropertiesVariable updateVariable =
+                currentContext.VariableList.Find(
+                    p =>
+                        (p is GremlinUpdatePropertiesVariable) &&
+                        (p as GremlinUpdatePropertiesVariable).UpdateVariable == this) as GremlinUpdatePropertiesVariable;
+            if (updateVariable == null)
             {
-                case GremlinVariableType.Vertex:
-                    updateVariable =
-                        currentContext.VariableList.Find(
-                            p =>
-                                (p is GremlinUpdateVertexPropertiesVariable) &&
-                                (p as GremlinUpdateVertexPropertiesVariable).VertexVariable == this) as GremlinUpdateVertexPropertiesVariable;
-                    if (updateVariable == null)
-                    {
-                        updateVariable = new GremlinUpdateVertexPropertiesVariable(this, properties);
-                        currentContext.VariableList.Add(updateVariable);
-                        currentContext.TableReferences.Add(updateVariable);
-                    }
-                    else
-                    {
-                        updateVariable.Property(currentContext, properties);
-                    }
-                    break;
-                case GremlinVariableType.Edge:
-                    updateVariable =
-                        currentContext.VariableList.Find(
-                            p =>
-                                (p is GremlinUpdateEdgePropertiesVariable) &&
-                                (p as GremlinUpdateEdgePropertiesVariable).EdgeVariable == this) as GremlinUpdateEdgePropertiesVariable;
-                    if (updateVariable == null)
-                    {
-                        updateVariable = new GremlinUpdateEdgePropertiesVariable(this, properties);
-                        currentContext.VariableList.Add(updateVariable);
-                        currentContext.TableReferences.Add(updateVariable);
-                    }
-                    else
-                    {
-                        updateVariable.Property(currentContext, properties);
-                    }
-                    break;
-                default:
-                    throw new Exception();
+                updateVariable = new GremlinUpdatePropertiesVariable(this, vertexProperty);
+                currentContext.VariableList.Add(updateVariable);
+                currentContext.TableReferences.Add(updateVariable);
+            }
+            else
+            {
+                updateVariable.PropertyList.Add(vertexProperty);
             }
         }
-
-        //internal virtual void Property(GremlinToSqlContext currentContext, VertexProperty.Cardinality cardinality, string key, string value, params string[] keyValues)
 
         internal virtual void PropertyMap(GremlinToSqlContext currentContext, params string[] propertyKeys)
         {
@@ -699,16 +750,18 @@ namespace GraphView
 
         internal virtual void Range(GremlinToSqlContext currentContext, int low, int high, GremlinKeyword.Scope scope, bool isReverse)
         {
-            Low = low;
-            High = high;
-            IsLocal = scope == GremlinKeyword.Scope.local;
-            IsReverse = isReverse;
+            GremlinRangeVariable newVariable = new GremlinRangeVariable(this, low, high, scope, isReverse);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
         }
 
         internal virtual void Repeat(GremlinToSqlContext currentContext, GremlinToSqlContext repeatContext,
                                      RepeatCondition repeatCondition)
         {
-            GremlinTableVariable newVariable = GremlinRepeatVariable.Create(this, repeatContext, repeatCondition);
+            GremlinVariableType variableType = repeatContext.PivotVariable.GetVariableType() == GetVariableType()
+                ? GetVariableType()
+                : GremlinVariableType.Table;
+            GremlinRepeatVariable newVariable = new GremlinRepeatVariable(this, repeatContext, repeatCondition, variableType);
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             currentContext.SetPivotVariable(newVariable);
@@ -723,7 +776,7 @@ namespace GraphView
             throw new NotImplementedException();
         }
 
-        internal virtual void sample(GremlinToSqlContext currentContext, GremlinKeyword.Scope scope, int amountToSample)
+        internal virtual void Sample(GremlinToSqlContext currentContext, GremlinKeyword.Scope scope, int amountToSample)
         {
             throw new NotImplementedException();
         }
@@ -835,7 +888,12 @@ namespace GraphView
             currentContext.TableReferences.Add(newVariable);
         }
 
-        //internal virtual void SimplePath()
+        internal virtual void SimplePath(GremlinToSqlContext currentContext)
+        {
+            GremlinSimplePathVariable newVariable = new GremlinSimplePathVariable(generatePath(currentContext));
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+        }
 
         internal virtual void Store(GremlinToSqlContext currentContext, string sideEffectKey, GremlinToSqlContext projectContext)
         {
@@ -868,41 +926,27 @@ namespace GraphView
             throw new NotImplementedException();
         }
 
-        internal virtual void Times(GremlinToSqlContext currentContext, int maxLoops)
+        internal virtual void Tree(GremlinToSqlContext currentContext, List<GraphTraversal2> byList)
         {
-            throw new NotImplementedException();
-        }
-
-        //internal virtual void To(GremlinToSqlContext currentContext, Direction direction, params string[] edgeLabels)
-
-        internal virtual void To(GremlinToSqlContext currentContext, string toGremlinTranslationOperatorLabel)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void To(GremlinToSqlContext currentContext, GremlinToSqlContext toVertex)
-        {
-            throw new NotImplementedException();
-        }
-        //internal virtual void ToE(GremlinToSqlContext currentContext, Direction direction, params string[] edgeLabels)
-        //internal virtual void ToV(GremlinToSqlContext currentContext, Direction direction)
-        internal virtual void Tree(GremlinToSqlContext currentContext)
-        {
-            GremlinPathVariable pathVariable = new GremlinPathVariable(currentContext.GetGremlinStepList());
-            currentContext.VariableList.Add(pathVariable);
-            currentContext.TableReferences.Add(pathVariable);
-
+            GremlinPathVariable pathVariable = generatePath(currentContext, byList);
             GremlinTreeVariable newVariable = new GremlinTreeVariable(currentContext.Duplicate(), pathVariable);
             currentContext.Reset();
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             currentContext.SetPivotVariable(newVariable);
         }
-        //internal virtual void tree(GremlinToSqlContext currentContext, string sideEffectKey)
+
+        internal virtual void Tree(GremlinToSqlContext currentContext, string sideEffectKey, List<GraphTraversal2> byList)
+        {
+            GremlinPathVariable pathVariable = generatePath(currentContext, byList);
+            GremlinTreeSideEffectVariable newVariable = new GremlinTreeSideEffectVariable(sideEffectKey, pathVariable);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+        }
 
         internal virtual void Unfold(GremlinToSqlContext currentContext)
         {
-            GremlinTableVariable newVariable = GremlinUnfoldVariable.Create(this);
+            GremlinUnfoldVariable newVariable = new GremlinUnfoldVariable(this, GetUnfoldVariableType());
             currentContext.VariableList.Add(newVariable);
             currentContext.TableReferences.Add(newVariable);
             currentContext.SetPivotVariable(newVariable);
@@ -910,7 +954,7 @@ namespace GraphView
 
         internal virtual void Union(ref GremlinToSqlContext currentContext, List<GremlinToSqlContext> unionContexts)
         {
-            GremlinTableVariable newVariable = GremlinUnionVariable.Create(unionContexts);
+            GremlinUnionVariable newVariable = new GremlinUnionVariable(unionContexts, GremlinUtil.GetContextListType(unionContexts));
             foreach (var unionContext in unionContexts)
             {
                 unionContext.HomeVariable = newVariable;
@@ -920,44 +964,39 @@ namespace GraphView
             currentContext.SetPivotVariable(newVariable);
         }
 
-        internal virtual void Until(GremlinToSqlContext currentContext, Predicate untilPredicate)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void Until(GremlinToSqlContext currentContext, GremlinToSqlContext untilContext)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void V(GremlinToSqlContext currentContext, params object[] vertexIdsOrElements)
-        {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void V(GremlinToSqlContext currentContext, List<object> vertexIdsOrElements)
-        {
-            throw new NotImplementedException();
-        }
-
         internal virtual void Value(GremlinToSqlContext currentContext)
         {
-            throw new NotImplementedException();
+            GremlinValueVariable newVariable = new GremlinValueVariable(DefaultVariableProperty());
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
-        internal virtual void ValueMap(GremlinToSqlContext currentContext, Boolean includeTokens, params string[] propertyKeys)
+        internal virtual void ValueMap(GremlinToSqlContext currentContext, bool isIncludeTokens, List<string> propertyKeys)
         {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void ValueMap(GremlinToSqlContext currentContext, params string[] propertyKeys)
-        {
-            throw new NotImplementedException();
+            GremlinValueMapVariable newVariable = new GremlinValueMapVariable(this, isIncludeTokens, propertyKeys);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
         internal virtual void Values(GremlinToSqlContext currentContext, List<string> propertyKeys)
         {
-            throw new QueryCompilationException("The Values() step can only be applied to edges or vertex.");
+            if (propertyKeys.Count == 0)
+            {
+                Populate(GremlinKeyword.Star);
+            }
+            else
+            {
+                foreach (var property in propertyKeys)
+                {
+                    Populate(property);
+                }
+            }
+            GremlinValuesVariable newVariable = new GremlinValuesVariable(this, propertyKeys);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
         internal virtual void Where(GremlinToSqlContext currentContext, Predicate predicate)
@@ -985,3 +1024,4 @@ namespace GraphView
 
     }
 }
+

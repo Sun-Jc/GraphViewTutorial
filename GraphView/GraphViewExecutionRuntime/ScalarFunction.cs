@@ -132,11 +132,21 @@ namespace GraphView
 
         public override FieldObject Evaluate(RawRecord record)
         {
-            //return record[fieldIndex]?.ToString();
             FieldObject fo = record[fieldIndex];
 
-            if (fo is PropertyField)
-                dataType = (fo as PropertyField).JsonDataType;
+            StringField sf = fo as StringField;
+            if (sf != null)
+            {
+                dataType = sf.JsonDataType;
+                return fo;
+            }
+
+            PropertyField pf = fo as PropertyField;
+            if (pf != null)
+            {
+                dataType = pf.JsonDataType;
+                return fo;
+            }
 
             return fo;
         }
@@ -169,11 +179,11 @@ namespace GraphView
 
         public override FieldObject Evaluate(RawRecord record)
         {
-            JsonDataType targetType = DataType();
             //string value1 = f1.Evaluate(record);
             //string value2 = f2.Evaluate(record);
             string value1 = f1.Evaluate(record)?.ToValue;
             string value2 = f2.Evaluate(record)?.ToValue;
+            JsonDataType targetType = DataType();
 
             switch (targetType)
             {
@@ -382,13 +392,12 @@ namespace GraphView
 
         public override FieldObject Evaluate(RawRecord record)
         {
-            Dictionary<FieldObject, FieldObject> compositField = new Dictionary<FieldObject, FieldObject>(targetFieldsAndTheirNames.Count);
-            foreach (Tuple<string, int> p in targetFieldsAndTheirNames)
-            {
-                compositField[new StringField(p.Item1)] = record[p.Item2];
+            Dictionary<string, FieldObject> compositField = new Dictionary<string, FieldObject>(targetFieldsAndTheirNames.Count);
+            foreach (Tuple<string, int> p in targetFieldsAndTheirNames) {
+                compositField[p.Item1] = record[p.Item2];
             }
 
-            return new Compose1Field(compositField, new StringField(defaultProjectionKey));
+            return new Compose1Field(compositField, defaultProjectionKey);
         }
 
         public override JsonDataType DataType()
@@ -449,38 +458,43 @@ namespace GraphView
 
     internal class WithOutArray : ScalarFunction
     {
-        private int _checkFieldIndex;
-        private int _arrayFieldIndex;
+        private int checkFieldIndex;
+        private int arrayFieldIndex;
 
         public WithOutArray(int checkFieldIndex, int arrayFieldIndex)
         {
-            _checkFieldIndex = checkFieldIndex;
-            _arrayFieldIndex = arrayFieldIndex;
+            this.checkFieldIndex = checkFieldIndex;
+            this.arrayFieldIndex = arrayFieldIndex;
         }
 
         public override FieldObject Evaluate(RawRecord record)
         {
-            FieldObject checkObject = record[_checkFieldIndex];
-            CollectionField arrayObject = record[_arrayFieldIndex] as CollectionField;
-            if (arrayObject == null)
-                throw new GraphViewException("The second paramter of the WithInArray function must be located to a collection field");
+            FieldObject checkObject = record[this.checkFieldIndex];
             if (checkObject == null) return new StringField("false", JsonDataType.Boolean);
 
-            foreach (FieldObject fieldObject in arrayObject.Collection)
+            CollectionField arrayObject = record[this.arrayFieldIndex] as CollectionField;
+            if (arrayObject != null)
             {
-                if (fieldObject is Compose1Field)
+                foreach (FieldObject fieldObject in arrayObject.Collection)
                 {
-                    Compose1Field compose1Field = fieldObject as Compose1Field;
-                    if (checkObject.Equals(compose1Field.Map[compose1Field.DefaultProjectionKey]))
+                    if (fieldObject is Compose1Field)
+                    {
+                        Compose1Field compose1Field = fieldObject as Compose1Field;
+                        if (checkObject.Equals(compose1Field.CompositeFieldObject[compose1Field.DefaultProjectionKey]))
+                            return new StringField("false", JsonDataType.Boolean);
+                    }
+                    else if (checkObject.Equals(fieldObject))
+                    {
                         return new StringField("false", JsonDataType.Boolean);
+                    }
                 }
-                else if (checkObject.Equals(fieldObject))
-                {
-                    return new StringField("false", JsonDataType.Boolean);
-                }
+
+                return new StringField("true", JsonDataType.Boolean);
             }
 
-            return new StringField("true", JsonDataType.Boolean);
+            return checkObject.Equals(record[this.arrayFieldIndex])
+                ? new StringField("false", JsonDataType.Boolean)
+                : new StringField("true", JsonDataType.Boolean);
         }
 
         public override JsonDataType DataType()
@@ -491,38 +505,43 @@ namespace GraphView
 
     internal class WithInArray : ScalarFunction
     {
-        private int _checkFieldIndex;
-        private int _arrayFieldIndex;
+        private int checkFieldIndex;
+        private int arrayFieldIndex;
 
         public WithInArray(int checkFieldIndex, int arrayFieldIndex)
         {
-            _checkFieldIndex = checkFieldIndex;
-            _arrayFieldIndex = arrayFieldIndex;
+            this.checkFieldIndex = checkFieldIndex;
+            this.arrayFieldIndex = arrayFieldIndex;
         }
 
         public override FieldObject Evaluate(RawRecord record)
         {
-            FieldObject checkObject = record[_checkFieldIndex];
-            CollectionField arrayObject = record[_arrayFieldIndex] as CollectionField;
-            if (arrayObject == null)
-                throw new GraphViewException("The second paramter of the WithInArray function must be located to a collection field");
+            FieldObject checkObject = record[this.checkFieldIndex];
             if (checkObject == null) return new StringField("false", JsonDataType.Boolean);
 
-            foreach (FieldObject fieldObject in arrayObject.Collection)
+            CollectionField arrayObject = record[this.arrayFieldIndex] as CollectionField;
+            if (arrayObject != null)
             {
-                if (fieldObject is Compose1Field)
+                foreach (FieldObject fieldObject in arrayObject.Collection)
                 {
-                    Compose1Field compose1Field = fieldObject as Compose1Field;
-                    if (checkObject.Equals(compose1Field.Map[compose1Field.DefaultProjectionKey]))
+                    if (fieldObject is Compose1Field)
+                    {
+                        Compose1Field compose1Field = fieldObject as Compose1Field;
+                        if (checkObject.Equals(compose1Field.CompositeFieldObject[compose1Field.DefaultProjectionKey]))
+                            return new StringField("true", JsonDataType.Boolean);
+                    }
+                    else if (checkObject.Equals(fieldObject))
+                    {
                         return new StringField("true", JsonDataType.Boolean);
+                    }
                 }
-                else if (checkObject.Equals(fieldObject))
-                {
-                    return new StringField("true", JsonDataType.Boolean);
-                }
+
+                return new StringField("false", JsonDataType.Boolean);
             }
 
-            return new StringField("false", JsonDataType.Boolean);
+            return checkObject.Equals(record[this.arrayFieldIndex])
+                ? new StringField("true", JsonDataType.Boolean)
+                : new StringField("false", JsonDataType.Boolean);
         }
 
         public override JsonDataType DataType()
@@ -551,7 +570,7 @@ namespace GraphView
 
             if (vertexField != null)
             {
-                if (vertexField.VertexProperties.ContainsKey(_propertyName))
+                if (vertexField.AllProperties.Count(pf => pf.PropertyName ==  _propertyName) > 0)
                     return new StringField("true", JsonDataType.Boolean);
                 else
                     return new StringField("false", JsonDataType.Boolean);

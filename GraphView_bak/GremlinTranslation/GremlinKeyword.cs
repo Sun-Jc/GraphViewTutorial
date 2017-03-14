@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,9 +9,11 @@ namespace GraphView
 {
     public class GremlinKeyword
     {
+        public const bool OLD = true;
+
         public const string Label = "label";
         public const string SinkLabel = "_sinkLabel";
-        public const string EdgeID = "_offset";
+        public const string EdgeID = "_edgeId";
         public const string EdgeReverseID = "_reverse_ID";
         public const string EdgeSourceV = "_source";
         public const string EdgeSinkV = "_sink";
@@ -18,13 +21,12 @@ namespace GraphView
         public const string NodeID = "id";
         public const string EdgeAdj = "_edge";
         public const string ReverseEdgeAdj = "_reverse_edge";
-        public const string TableDefaultColumnName = "_t";
         public const string Path = "_path";
-        public const string DefaultProject = "_result";
-        public const string ScalarValue = "_value";
-        public const string PropertyValue = "_value";
         public const string Star = "*";
-
+        public const string Compose1TableDefaultName = "C";
+        public const string RepeatInitalTableName = "R";
+        public const string RepeatColumnPrefix = "key_";
+        public static string TableDefaultColumnName = "value$" + Guid.NewGuid().ToString().Substring(0, 8);
 
         public static class func
         {
@@ -39,8 +41,11 @@ namespace GraphView
             public const string OutV = "OutV";
             public const string InV = "InV";
             public const string BothV = "BothV";
+            public const string EtoV = "EtoV";
             public const string Optional = "Optional";
             public const string Properties = "Properties";
+            public const string AllProperties = "AllProperties";
+            public const string VertexProperties = "Properties";
             public const string Repeat = "Repeat";
             public const string Value = "Value";
             public const string Values = "Values";
@@ -50,14 +55,12 @@ namespace GraphView
             public const string AddV = "AddV";
             public const string AddE = "AddE";
             public const string SideEffect = "SideEffect";
-            public const string Dedup = "Dedup";
+            public const string DedupGlobal = "DedupGlobal";
+            public const string DedupLocal = "DedupLocal";
             public const string Fold = "fold";
             public const string Count = "count";
-            public const string DropNode = "DropNode";
-            public const string DropEdge = "DropEdge";
-            public const string DropProperties = "DropProperties";
-            public const string UpdateNodeProperties = "UpdateNodeProperties";
-            public const string UpdateEdgeProperties = "UpdateEdgeProperties";
+            public const string Drop = "Drop";
+            public const string UpdateProperties = "UpdateProperties";
             public const string Path = "Path";
             public const string Inject = "Inject";
             public const string Tree = "Tree";
@@ -81,6 +84,18 @@ namespace GraphView
             public const string Mean = "Mean";
             public const string Sum = "Sum";
             public const string SumLocal = "SumLocal";
+            public const string OrderGlobal = "OrderGlobal";
+            public const string OrderLocal = "OrderLocal";
+            public const string Path2 = "Path2";
+            public const string Range = "Range";
+            public const string Decompose1 = "Decompose1";
+            public const string SimplePath = "SimplePath";
+            public const string CyclicPath = "CyclicPath";
+            public const string ValueMap = "ValueMap";
+            public const string PropertyMap = "PropertyMap";
+            public const string SampleGlobal = "SampleGlobal";
+            public const string SampleLocal = "SampleLocal";
+            public const string Barrier = "Barrier";
         }
 
         public enum Pop
@@ -102,17 +117,19 @@ namespace GraphView
             local,
             global
         }
+
+
         public enum Order
         {
             Shuffle,
-            Desr,
+            Decr,
             Incr
         }
 
-        public enum VertexPropertyCardinality
+        public enum PropertyCardinality
         {
-            single,
-            list,
+            single,   // Set
+            list,     // Append
             //set
         }
 
@@ -122,21 +139,33 @@ namespace GraphView
                 {"as", "As"},
                 {"addV", "AddV"},
                 {"addE", "AddE"},
+                {"aggregate", "Aggregate"},
                 {"and", "And"},
                 {"barrier", "Barrier"},
                 {"both", "Both"},
+                {"bothE", "BothE"},
+                {"bothV", "BothV"},
                 {"by", "By"},
                 {"cap", "Cap"},
                 {"count", "Count"},
+                {"choose", "Choose"},
                 {"constant", "Constant"},
                 {"coalesce", "Coalesce"},
+                {"cyclicPath", "CyclicPath"},
+                {"coin", "Coin"},
                 {"drop", "Drop"},
                 {"dedup", "Dedup"},
+                {"emit", "Emit"},
                 {"fold", "Fold"},
                 {"from", "From"},
                 {"flatMap", "FlatMap"},
+                {"group", "Group"},
+                {"groupCount", "GroupCount"},
                 {"has", "Has"},
+                {"hasId", "HasId"},
                 {"hasLabel", "HasLabel"},
+                {"hasKey", "HasKey"},
+                {"hasValue", "HasValue"},
                 {"is", "Is"},
                 {"inject", "Inject"},
                 {"id", "Id"},
@@ -147,10 +176,17 @@ namespace GraphView
                 {"key", "Key"},
                 {"label", "Label"},
                 {"local", "Local"},
+                {"limit", "Limit"},
                 {"map", "Map"},
+                {"match", "Match"},
+                {"max", "Max"},
+                {"mean", "Mean"},
+                {"min", "Min"},
                 {"not", "Not"},
+                {"option", "Option"},
                 {"optional", "Optional"},
                 {"or", "Or" },
+                {"order", "Order"},
                 {"otherV", "OtherV"},
                 {"out", "Out"},
                 {"outE", "OutE"},
@@ -159,22 +195,28 @@ namespace GraphView
                 {"property", "Property"},
                 {"properties", "Properties"},
                 {"project", "Project"},
+                {"propertyMap", "PropertyMap"},
+                {"range", "Range"},
+                {"repeat", "Repeat"},
+                {"sample", "Sample"},
                 {"sideEffect", "SideEffect"},
                 {"select", "Select"},
+                {"simplePath", "SimplePath"},
                 {"store", "Store"},
-                {"repeat", "Repeat"},
+                {"sum", "Sum"},
                 {"until", "Until"},
-                {"emit", "Emit"},
-                {"range", "Range"},
                 {"to", "To"},
                 {"tree", "Tree"},
+                {"tail", "Tail"},
+                {"timeLimit", "TimeLimit"},
+                {"times", "Times"},
                 {"unfold", "Unfold"},
                 {"union", "Union"},
                 {"values", "Values"},
                 {"V", "V"},
                 {"where", "Where"},
-                {"group", "Group"},
                 {"value", "Value"},
+                {"valueMap", "ValueMap"},
                 {"next", "Next"},
                 {"toList", "ToList"}
             };
@@ -208,14 +250,5 @@ namespace GraphView
             {"last", "GremlinKeyword.Pop.last"},
             {"first", "GremlinKeyword.Pop.first"},
         };
-    }
-
-    public enum GremlinEdgeType
-    {
-        BothE,
-        BothForwardE,
-        InE,
-        InForwardE,
-        OutE
     }
 }

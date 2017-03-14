@@ -29,6 +29,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -83,6 +84,7 @@ namespace GraphView
 
         private DocumentClient DocDBClient { get; }  // Don't expose DocDBClient to outside!
 
+        internal CollectionType CollectionType { get; private set; }
 
         /// <summary>
         /// Initializes a new connection to DocDB.
@@ -96,7 +98,9 @@ namespace GraphView
             string docDBEndpointUrl,
             string docDBAuthorizationKey,
             string docDBDatabaseID,
-            string docDBCollectionID)
+            string docDBCollectionID,
+            CollectionType collectionType = CollectionType.UNDEFINED,
+            string preferredLocation = null)
         {
             // TODO: Parameter checking!
 
@@ -109,18 +113,74 @@ namespace GraphView
             this.DocDBPrimaryKey = docDBAuthorizationKey;
             this.DocDBDatabaseId = docDBDatabaseID;
             this.DocDBCollectionId = docDBCollectionID;
+
+            ConnectionPolicy connectionPolicy = new ConnectionPolicy {
+                ConnectionMode = ConnectionMode.Direct,
+                ConnectionProtocol = Protocol.Tcp,
+            };
+            if (!string.IsNullOrEmpty(preferredLocation)) {
+                connectionPolicy.PreferredLocations.Add(preferredLocation);
+            }
+
             this.DocDBClient = new DocumentClient(new Uri(this.DocDBUrl),
                                                   this.DocDBPrimaryKey,
-                                                  new ConnectionPolicy {
-                                                      ConnectionMode = ConnectionMode.Direct,
-                                                      ConnectionProtocol = Protocol.Tcp,
-                                                  });
+                                                  connectionPolicy);
             this.DocDBClient.OpenAsync().Wait();
+
+
+            //
+            // Check whether it is a partition collection (if exists)
+            //
+            DocumentCollection docDBCollection;
+            try {
+                docDBCollection = this.DocDBClient.CreateDocumentCollectionQuery(
+                                                             UriFactory.CreateDatabaseUri(this.DocDBDatabaseId))
+                                                         .Where(c => c.Id == this.DocDBCollectionId)
+                                                         .AsEnumerable()
+                                                         .FirstOrDefault();
+            }
+            catch (AggregateException aggex) 
+            when ((aggex.InnerException as DocumentClientException)?.Error.Code == "NotFound") {
+                // Now the database does not exist!
+                // NOTE: If the database exists, but the collection does not exist, it won't be an exception
+                docDBCollection = null;
+            }
+
+            bool? isPartitionedNow = (docDBCollection?.PartitionKey.Paths.Count > 0);
+            if (isPartitionedNow.HasValue && isPartitionedNow.Value) {
+                if (collectionType == CollectionType.STANDARD) {
+                    throw new Exception("Can't specify CollectionType.STANDARD on an existing partitioned collection");
+                }
+            }
+            else if (isPartitionedNow.HasValue && !isPartitionedNow.Value) {
+                if (collectionType == CollectionType.PARTITIONED) {
+                    throw new Exception("Can't specify CollectionType.PARTITIONED on an existing standard collection");
+                }
+            }
+            this.CollectionType = collectionType;
+
+            if (collectionType == CollectionType.UNDEFINED) {
+                if (docDBCollection == null) {
+                    // Do nothing
+                }
+                else if (docDBCollection.PartitionKey != null && docDBCollection.PartitionKey.Paths.Count < 1) {
+                    this.CollectionType = CollectionType.STANDARD;
+                }
+                else if (docDBCollection.PartitionKey != null
+                         && docDBCollection.PartitionKey.Paths.Count > 0
+                         && docDBCollection.PartitionKey.Paths[0].Equals("/_partition", StringComparison.OrdinalIgnoreCase)) {
+                    this.CollectionType = CollectionType.PARTITIONED;
+                }
+                else {
+                    throw new Exception(string.Format("Collection not properly configured. If you wish to configure a partitioned collection, please chose /{0} as partitionKey", "_partition"));
+                }
+            }
 
             this.Identifier = $"{docDBEndpointUrl}\0{docDBDatabaseID}\0{docDBCollectionID}";
             this.VertexCache = VertexObjectCache.FromConnection(this);
 
             this.UseReverseEdges = true;
+            
 
             // Retrieve metadata from DocDB
             JObject metaObject = RetrieveDocumentById("metadata");
@@ -163,7 +223,17 @@ namespace GraphView
         }
 
 
-        public void ResetCollection(int? edgeSpillThreshold = null)
+        /// <summary>
+        /// If the collection has existed, reset the collection.
+        ///   - collectionType = STANDARD: the collection is reset to STANDARD
+        ///   - collectionType = PARTITIONED: the collection is reset to PARTITIONED
+        ///   - collectionType = UNDEFINED: the collection's partition property remains the same as original one
+        /// If the collection does not exist, create the collection
+        ///   - collectionType = STANDARD: the newly created collection is STANDARD
+        ///   - collectionType = PARTITIONED: the newly created collection is PARTITIONED
+        ///   - collectionType = UNDEFINED: an exception is thrown!
+        /// </summary>
+        public void ResetCollection(CollectionType collectionType = CollectionType.STANDARD, int? edgeSpillThreshold = null)
         {
             EnsureDatabaseExist();
 
@@ -176,7 +246,24 @@ namespace GraphView
             if (docDBCollection != null) {
                 DeleteCollection();
             }
-            CreateCollection();
+
+            switch (collectionType) {
+            case CollectionType.STANDARD:
+            case CollectionType.PARTITIONED:
+                break;
+            case CollectionType.UNDEFINED:
+                if (this.CollectionType == CollectionType.UNDEFINED) {
+                    throw new Exception("Can't specify CollectionType.UNDEFINED to reset a non-existing collection");
+                }
+                collectionType = this.CollectionType;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(collectionType), collectionType, null);
+            }
+
+            Debug.Assert(collectionType != CollectionType.UNDEFINED);
+            CreateCollection(collectionType == CollectionType.PARTITIONED);
+            this.CollectionType = collectionType;
 
             //
             // Create a meta-data document!
@@ -203,13 +290,20 @@ namespace GraphView
 
 
 
-        private void CreateCollection()
+        private void CreateCollection(bool isPartitionCollection)
         {
             // TODO: Make the OfferType configurable?
 
+            DocumentCollection collection = new DocumentCollection {
+                Id = this.DocDBCollectionId,
+            };
+            if (isPartitionCollection) {
+                collection.PartitionKey.Paths.Add("/_partition");
+            }
+
             this.DocDBClient.CreateDocumentCollectionAsync(
                 this._docDBDatabaseUri,
-                new DocumentCollection {Id = this.DocDBCollectionId},
+                collection,
                 new RequestOptions {OfferType = "S3"}
             ).Wait();
         }
@@ -229,9 +323,10 @@ namespace GraphView
         {
             Debug.Assert(docObject != null, "The newly created document should not be null");
             Debug.Assert(docObject["id"] != null, "The newly created document should specify 'id' field");
+            Debug.Assert(docObject["_partition"] != null, "The newly created document should specify '_partition' field");
 
             Document createdDocument = await this.DocDBClient.CreateDocumentAsync(this._docDBCollectionUri, docObject);
-            docObject["id"] = createdDocument.Id;
+            Debug.Assert((string)docObject["id"] == createdDocument.Id);
             return createdDocument.Id;
         }
 
@@ -246,44 +341,54 @@ namespace GraphView
         {
             foreach (JObject docObject in docObjects) {
                 Debug.Assert(docObject != null, "The newly created document should not be null");
-                Debug.Assert(docObject["id"] == null, "The newly created document should not contains 'id' field");
+                Debug.Assert(docObject["id"] != null, "The newly created document should contain 'id' field");
+                Debug.Assert(docObject["_partition"] != null, "The newly created document should contain '_partition' field");
 
                 Document createdDoc = await this.DocDBClient.CreateDocumentAsync(this._docDBCollectionUri, docObject);
-                docObject["id"] = createdDoc.Id;
+                Debug.Assert((string)docObject["id"] == createdDoc.Id);
             }
         }
 
 
-        internal async Task ReplaceOrDeleteDocumentAsync(string docId, JObject docObject)
+        internal async Task ReplaceOrDeleteDocumentAsync(string docId, JObject docObject, string partition)
         {
+            RequestOptions option = null;
+            if (this.CollectionType == CollectionType.PARTITIONED) {
+                option = new RequestOptions {
+                    PartitionKey = new PartitionKey(partition)
+                };
+            }
+
             Uri documentUri = UriFactory.CreateDocumentUri(this.DocDBDatabaseId, this.DocDBCollectionId, docId);
             if (docObject == null) {
-                this.DocDBClient.DeleteDocumentAsync(documentUri).Wait();
+                this.DocDBClient.DeleteDocumentAsync(documentUri, option).Wait();
             }
             else {
-#if DEBUG
-                if (docObject["id"] != null) {
-                    Debug.Assert(docObject["id"] is JValue);
-                    Debug.Assert((string)docObject["id"] == docId, "The replaced document should match ID in the parameter");
-                }
-#endif
-                await this.DocDBClient.ReplaceDocumentAsync(documentUri, docObject);
+                Debug.Assert(docObject["id"] is JValue);
+                Debug.Assert((string)docObject["id"] == docId, "The replaced document should match ID in the parameter");
+                Debug.Assert(partition != null && partition == (string)docObject["_partition"]);
+
+                await this.DocDBClient.ReplaceDocumentAsync(documentUri, docObject, option);
                 docObject["id"] = docId;
             }
         }
 
-        internal async Task ReplaceOrDeleteDocumentsAsync(Dictionary<string, JObject> documentsMap)
+        internal async Task ReplaceOrDeleteDocumentsAsync(Dictionary<string, Tuple<JObject, string>> documentsMap)
         {
 #if DEBUG
             // Make sure that there aren't two docObject (not null) sharing the same reference
-            List<JObject> docObjectList = documentsMap.Values.Where(docObject => docObject != null).ToList();
-            HashSet<JObject> docObjectSet = new HashSet<JObject>(docObjectList);
+            List<Tuple<JObject, string>> docObjectList = documentsMap.Values.Where(docObject => docObject != null).ToList();
+            HashSet<Tuple<JObject, string>> docObjectSet = new HashSet<Tuple<JObject, string>>(docObjectList);
             Debug.Assert(docObjectList.Count == docObjectSet.Count, "Replacing documents with two docObject sharing the same reference");
 #endif
-            foreach (KeyValuePair<string, JObject> pair in documentsMap) {
+            foreach (KeyValuePair<string, Tuple<JObject, string>> pair in documentsMap) {
                 string docId = pair.Key;
-                JObject docObject = pair.Value;  // Can be null (null means deletion)
-                await ReplaceOrDeleteDocumentAsync(docId, docObject);
+                JObject docObject = pair.Value.Item1;  // Can be null (null means deletion)
+                string partition = pair.Value.Item2;  // Partition
+                if (docObject != null) {
+                    Debug.Assert(partition == (string)docObject["_partition"]);
+                }
+                await ReplaceOrDeleteDocumentAsync(docId, docObject, partition);
             }
         }
 
@@ -299,7 +404,13 @@ namespace GraphView
                 // It seems that DocDB won't return an empty result, but throw an exception instead!
                 // 
                 string script = $"SELECT * FROM Doc WHERE Doc.id = '{docId}'";
-                FeedOptions queryOptions = new FeedOptions { MaxItemCount = -1 }; // dynamic paging
+                FeedOptions queryOptions = new FeedOptions {
+                    MaxItemCount = -1,  // dynamic paging
+                };
+                if (this.CollectionType == CollectionType.PARTITIONED) {
+                    queryOptions.EnableCrossPartitionQuery = true;
+                }
+
                 List<dynamic> result = this.DocDBClient.CreateDocumentQuery(
                     UriFactory.CreateDocumentCollectionUri(this.DocDBDatabaseId, this.DocDBCollectionId),
                     script,
@@ -319,7 +430,12 @@ namespace GraphView
         internal IQueryable<dynamic> ExecuteQuery(string queryScript, FeedOptions queryOptions = null)
         {
             if (queryOptions == null) {
-                queryOptions = new FeedOptions { MaxItemCount = -1 };
+                queryOptions = new FeedOptions {
+                    MaxItemCount = -1,
+                };
+                if (this.CollectionType == CollectionType.PARTITIONED) {
+                    queryOptions.EnableCrossPartitionQuery = true;
+                }
             }
 
             return this.DocDBClient.CreateDocumentQuery(
@@ -346,6 +462,7 @@ namespace GraphView
             Guid guid = Guid.NewGuid();
             return guid.ToString("D");
         }
+        
     }
-    
+
 }

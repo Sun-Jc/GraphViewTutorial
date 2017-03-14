@@ -25,6 +25,7 @@
 // 
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -71,10 +72,10 @@ namespace GraphView
     public abstract partial class WTableReferenceWithAlias : WTableReference 
     {
         internal Identifier Alias { set; get; }
-        internal int Low { get; set; }
-        internal int High { get; set; }
-        internal bool IsLocal { get; set; }
-        internal bool IsReverse { get; set; }
+        //internal int Low { get; set; }
+        //internal int High { get; set; }
+        //internal bool IsLocal { get; set; }
+        //internal bool IsReverse { get; set; }
     }
 
     public abstract partial class WTableReferenceWithAliasAndColumns : WTableReferenceWithAlias
@@ -395,69 +396,49 @@ namespace GraphView
         }
     }
 
-    public partial class WCoalesceTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
+    public partial class WCoalesceTableReference : WSchemaObjectFunctionTableReference {}
 
     public partial class WConstantReference : WSchemaObjectFunctionTableReference
     {
-
+        public bool IsList { get; set; }
     }
 
-    public partial class WBoundBothEdgeTableReference : WSchemaObjectFunctionTableReference
+    public partial class WBoundBothEdgeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WBoundOutEdgeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WBoundInEdgeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WDecompose1TableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WFlatMapTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WKeyTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WLocalTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WBoundBothNodeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WBoundOutNodeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WPropertiesTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WAllPropertiesTableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WAllValuesTableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WPathTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WInjectTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WOrderTableReference : WSchemaObjectFunctionTableReference
     {
-
+        public List<Tuple<WScalarExpression, IComparer>> OrderParameters { get; set; }
     }
 
-    public partial class WBoundOutEdgeTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WOrderLocalTableReference : WOrderTableReference {}
 
-    }
-
-    public partial class WBoundInEdgeTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WFlatMapTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-    public partial class WKeyTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WLocalTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WBoundBothNodeTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WBoundOutNodeTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WPropertiesTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WPathTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WInjectTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
+    public partial class WOrderGlobalTableReference : WOrderTableReference {}
 
     public partial class WRepeatTableReference : WSchemaObjectFunctionTableReference
     {
@@ -482,37 +463,41 @@ namespace GraphView
                 throw new SyntaxErrorException("The input of a repeat table reference must be a UNION ALL binary query and the two sub-queries must be a select query block.");
             }
         }
+
+        internal bool HasAggregateFunctionInTheRepeatSelectQuery(WSelectQueryBlock repeatSelectQuery)
+        {
+            AggregateFunctionCountVisitor aggregateCountVisitor = new AggregateFunctionCountVisitor();
+
+            return aggregateCountVisitor.Invoke(repeatSelectQuery) > 0;
+        }
     }
 
-    public partial class WValuesTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WSampleGlobalTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WSampleLocalTableReference : WSchemaObjectFunctionTableReference { }
 
-    public partial class WValueTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WValuesTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WValueTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WUnfoldTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WUnfoldTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WUnionTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WUnionTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WProjectTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
+    public partial class WProjectTableReference : WSchemaObjectFunctionTableReference {}
 
     public partial class WGroupTableReference : WSchemaObjectFunctionTableReference
     {
-        
+        public bool IsProjectingACollection { get; set; }
     }
+
+    public partial class WTreeTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WValueMapTableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WPropertyMapTableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WChooseTableReference : WSchemaObjectFunctionTableReference { }
 
     public partial class WAddETableReference : WSchemaObjectFunctionTableReference
     {
@@ -539,132 +524,127 @@ namespace GraphView
         }
     }
 
-    public class WVertexPropertyExpression: WPrimaryExpression
+    public class WPropertyExpression : WPrimaryExpression
     {
-        public GremlinKeyword.VertexPropertyCardinality Cardinality { get; set; }
+        /// <summary>
+        /// Indicate whether this property is to append(=list) or override(=single)
+        /// </summary>
+        public GremlinKeyword.PropertyCardinality Cardinality { get; set; }
+
+        /// <summary>
+        /// Property's name
+        /// </summary>
         public WValueExpression Key { get; set; }
+
+        /// <summary>
+        /// Property's value
+        /// </summary>
         public WValueExpression Value { get; set; }
+
+        /// <summary>
+        /// Only valid for vertex property
+        /// </summary>
         public Dictionary<WValueExpression, WValueExpression> MetaProperties { get; set; }
-    }
 
-    public partial class WAddVTableReference : WSchemaObjectFunctionTableReference
-    {
-        public JObject ConstructNodeJsonDocument(out List<string> projectedFieldList)
+        public override void Accept(WSqlFragmentVisitor visitor)
         {
-            JObject nodeJsonDocument = new JObject();
-            projectedFieldList = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
+            if (visitor != null)
+                visitor.Visit(this);
+        }
 
-            for (var i = 0; i < Parameters.Count; i += 2)
+        public override void AcceptChildren(WSqlFragmentVisitor visitor)
+        {
+            Key?.Accept(visitor);
+            Value?.Accept(visitor);
+
+            if (MetaProperties != null)
             {
-                var key = (Parameters[i] as WValueExpression).Value;
-
-                //nodeJsonDocument = GraphViewJsonCommand.insert_property(nodeJsonDocument, value, key).ToString();
-                GraphViewJsonCommand.UpdateProperty(nodeJsonDocument, Parameters[i] as WValueExpression,
-                    Parameters[i + 1] as WValueExpression);
-
-                if (!projectedFieldList.Contains(key))
-                    projectedFieldList.Add(key);
+                foreach (KeyValuePair<WValueExpression, WValueExpression> kvp in MetaProperties)
+                {
+                    kvp.Key.Accept(visitor);
+                    kvp.Value.Accept(visitor);
+                }
             }
 
-            //nodeJsonDocument = GraphViewJsonCommand.insert_property(nodeJsonDocument, "[]", "_edge").ToString();
-            //nodeJsonDocument = GraphViewJsonCommand.insert_property(nodeJsonDocument, "[]", "_reverse_edge").ToString();
-            nodeJsonDocument["_edge"] = new JArray();
-            nodeJsonDocument["_reverse_edge"] = new JArray();
-            nodeJsonDocument["_nextEdgeOffset"] = 0;
+            base.AcceptChildren(visitor);
+        }
 
-            return nodeJsonDocument;
+        internal override string ToString(string indent)
+        {
+            var sb = new StringBuilder();
+            sb.AppendFormat("{0}({1}, {2}, {3}",
+                indent,
+                Cardinality == GremlinKeyword.PropertyCardinality.list ? "list" : "single",
+                Key.ToString(), Value.ToString());
+            if (MetaProperties.Count > 0)
+            {
+                sb.Append(", Meta: (");
+                foreach (var metaProperty in MetaProperties)
+                {
+                    sb.AppendFormat("{0}:{1}", metaProperty.Key.ToString(), metaProperty.Value.ToString());
+                }
+                sb.Append(")");
+            }
+            sb.Append(")");
+            return sb.ToString();
         }
     }
 
-    public partial class WSideEffectTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WAddVTableReference2 : WSchemaObjectFunctionTableReference { }
 
-    }
+    public partial class WAddVTableReference : WSchemaObjectFunctionTableReference { }
 
-    public partial class WDedupTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WSideEffectTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WDedupGlobalTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WDropNodeTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WDedupLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WDropTableReference : WSchemaObjectFunctionTableReference { }
 
-    public partial class WDropEdgeTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WDropNodeTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WDropEdgeTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WDropPropertiesTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WDropTableReference : WSchemaObjectFunctionTableReference { }
 
-    }
+    public partial class WDropPropertiesTableReference : WSchemaObjectFunctionTableReference { }
 
-    public partial class WUpdateNodePropertiesTableReference : WSchemaObjectFunctionTableReference
-    {
+    //public partial class WUpdateVertexPropertiesTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WUpdateMetaPropertiesTableReference : WSchemaObjectFunctionTableReference { }
 
-    public partial class WUpdateEdgePropertiesTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WUpdatePropertiesTableReference : WSchemaObjectFunctionTableReference { }
 
-    }
+    public partial class WUpdateEdgePropertiesTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WStoreTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WStoreTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WAggregateTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WAggregateTableReference : WSchemaObjectFunctionTableReference
-    {
-        
-    }
+    public partial class WBarrierTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WBarrierTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WExpandTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WMapTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WExpandTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WCoinTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WCountLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WMapTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WMaxLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WMinLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WCoinTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WMeanLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    }
+    public partial class WSumLocalTableReference : WSchemaObjectFunctionTableReference {}
 
-    public partial class WCountLocalTableReference : WSchemaObjectFunctionTableReference
-    {
+    public partial class WSimplePathTableReference : WSchemaObjectFunctionTableReference {}
+    public partial class WCyclicPathTableReference : WSchemaObjectFunctionTableReference { }
+    public partial class WPath2TableReference : WSchemaObjectFunctionTableReference { }
 
-    }
-
-    public partial class WMaxLocalTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WMinLocalTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WMeanLocalTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
-
-    public partial class WSumLocalTableReference : WSchemaObjectFunctionTableReference
-    {
-
-    }
+    public partial class WRangeTableReference : WSchemaObjectFunctionTableReference {}
 
     public partial class WJoinParenthesisTableReference : WTableReference
     {

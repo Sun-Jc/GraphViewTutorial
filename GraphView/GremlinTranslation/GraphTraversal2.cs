@@ -321,6 +321,13 @@ namespace GraphView
 
         public GraphTraversal2 Barrier()
         {
+            AddGremlinOperator(new GremlinBarrierOp());
+            return this;
+        }
+
+        public GraphTraversal2 Barrier(int maxBarrierSize)
+        {
+            AddGremlinOperator(new GremlinBarrierOp(maxBarrierSize));
             return this;
         }
 
@@ -941,9 +948,10 @@ namespace GraphView
             return this;
         }
 
-        public GraphTraversal2 PropertyMap()
+        public GraphTraversal2 PropertyMap(params string[] propertyKeys)
         {
-            throw new NotImplementedException();
+            AddGremlinOperator(new GremlinPropertyMapOp(propertyKeys));
+            return this;
         }
 
         public GraphTraversal2 Range(int low, int high)
@@ -973,11 +981,16 @@ namespace GraphView
 
         public GraphTraversal2 Sample(int amountToSample)
         {
-            AddGremlinOperator(new GremlinSampleOp(amountToSample));
+            AddGremlinOperator(new GremlinSampleOp(GremlinKeyword.Scope.global, amountToSample));
             return this;
         }
 
-        //public GraphTraversal2 Sample(Scope scope, int amountToSample)
+        public GraphTraversal2 Sample(GremlinKeyword.Scope scope, int amountToSample)
+        {
+            AddGremlinOperator(new GremlinSampleOp(scope, amountToSample));
+            return this;
+        }
+
         //public GraphTraversal2 Select(Column column)
         //public GraphTraversal2 Select(Pop pop, string selectKey)
 
@@ -1177,7 +1190,8 @@ namespace GraphView
 
         public GraphTraversal2 Where(string startKey, Predicate predicate)
         {
-            AddGremlinOperator(new GremlinWhereOp(startKey, predicate));
+            //AddGremlinOperator(new GremlinWhereOp(startKey, predicate));
+            AddGremlinOperator(new GremlinWhereOp(GraphTraversal2.__().V().Has(startKey, predicate)));
             return this;
         }
 

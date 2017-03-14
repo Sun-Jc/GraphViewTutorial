@@ -12,8 +12,38 @@ using Newtonsoft.Json.Linq;
 
 namespace GraphView
 {
-    public class GraphViewJsonCommand
+    public static class GraphViewJsonCommand
     {
+        public static JValue ToJValue(this WValueExpression expr)
+        {
+            //
+            // Special treat when fieldValue indicates null (that is, to remove a property)
+            // NOTE: fieldValue itself != null
+            //
+            if (!expr.SingleQuoted && expr.Value.Equals("null", StringComparison.OrdinalIgnoreCase)) {
+                return null;
+            }
+
+            //
+            // JSON requires a lower case string if it is a boolean value
+            //
+            bool boolValue;
+            if (!expr.SingleQuoted && bool.TryParse(expr.Value, out boolValue)) {
+                return (JValue)boolValue;
+            }
+            else if (expr.SingleQuoted) {
+                return (JValue)expr.Value;  // String value
+            }
+            else {
+                return (JValue)JToken.Parse(expr.ToString());
+            }
+        }
+
+        //public static void AppendVertexSinglePropertyToVertex(JObject vertexJObject, JObject)
+        //{
+        //    // TODO
+        //}
+
         public static JProperty UpdateProperty(JObject jsonObject, WValueExpression fieldName, WValueExpression fieldValue)
         {
             string key = fieldName.Value;

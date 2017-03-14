@@ -472,7 +472,9 @@ namespace GraphView
         }
     }
 
-    public partial class WSampleTableReference : WSchemaObjectFunctionTableReference {}
+    public partial class WSampleGlobalTableReference : WSchemaObjectFunctionTableReference {}
+
+    public partial class WSampleLocalTableReference : WSchemaObjectFunctionTableReference { }
 
     public partial class WValuesTableReference : WSchemaObjectFunctionTableReference {}
 
@@ -492,6 +494,8 @@ namespace GraphView
     public partial class WTreeTableReference : WSchemaObjectFunctionTableReference {}
 
     public partial class WValueMapTableReference : WSchemaObjectFunctionTableReference { }
+
+    public partial class WPropertyMapTableReference : WSchemaObjectFunctionTableReference { }
 
     public partial class WChooseTableReference : WSchemaObjectFunctionTableReference { }
 

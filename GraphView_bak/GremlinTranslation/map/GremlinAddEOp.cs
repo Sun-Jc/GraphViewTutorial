@@ -21,6 +21,11 @@ namespace GraphView
         {
             GremlinToSqlContext inputContext = GetInputContext();
 
+            if (inputContext.PivotVariable == null)
+            {
+                throw new QueryCompilationException("AddE should follow by a Vertex");
+            } 
+
             inputContext.PivotVariable.AddE(inputContext, EdgeLabel);
 
             return inputContext;
@@ -47,7 +52,11 @@ namespace GraphView
 
             FromVertexTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
             GremlinToSqlContext fromVertexContext = FromVertexTraversal.GetEndOp().GetContext();
-            inputContext.PivotVariable.From(inputContext, fromVertexContext);
+            var gremlinAddETableVariable = inputContext.PivotVariable as GremlinAddETableVariable;
+            if (gremlinAddETableVariable != null)
+                gremlinAddETableVariable.From(inputContext, fromVertexContext);
+            else
+                throw new QueryCompilationException("From step only can follow by AddE step.");
 
             return inputContext;
         }
@@ -73,8 +82,11 @@ namespace GraphView
 
             ToVertexTraversal.GetStartOp().InheritedVariableFromParent(inputContext);
             GremlinToSqlContext toVertexContext = ToVertexTraversal.GetEndOp().GetContext();
-            inputContext.PivotVariable.To(inputContext, toVertexContext);
-
+            var gremlinAddETableVariable = inputContext.PivotVariable as GremlinAddETableVariable;
+            if (gremlinAddETableVariable != null)
+                gremlinAddETableVariable.To(inputContext, toVertexContext);
+            else
+                throw new QueryCompilationException("To step only can follow by AddE step.");
             return inputContext;
         }
     }

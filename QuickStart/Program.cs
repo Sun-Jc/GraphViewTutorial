@@ -74,9 +74,13 @@ namespace QuickStart
             res = graph.g().V().Has("name", "josh").Out("created").As("common").In("created").Has("name", "peter").Select("common").Values("name").Next();
             print("4)", res);
 
+            // 4+) same as 4)
+            res = graph.g().V().Has("name", "josh").Out("created").Where(GraphTraversal2.__().In("created").Has("name", "peter")).Values("name").Next();
+            print("4+)", res);
+            
             // 5) ask GraphView all the 3-hop paths starting from "marko"
             res = graph.g().V().Has("name", "marko").As("a").Both().As("b").Both().
-                Where(Predicate.neq("a")).Both().Where(Predicate.neq("b")).Path().Next();
+                Where(Predicate.neq("a")).Both().Where(Predicate.neq("b")).Path().By("name").Next();
             print("5)", res);
 
             // 6) change the age of "marko" into 25
@@ -107,7 +111,45 @@ namespace QuickStart
                 By(GraphTraversal2.__().Values("name")).Next();
             print("9)", res);
 
-            
+
+            // 10*) give out all the paths while traveling from "marko" within 2 hops
+            res = graph.g().V().Has("name", "marko").Emit().
+                Repeat(GraphTraversal2.__().Out().As("X")).Times(2).Path().By("name").Next();
+            print("10*)", res);
+
+            // 11*) Lowest Common Ancestor of A & D
+            graph.g().AddV("n").Property("name", "A").Next();
+            graph.g().AddV("n").Property("name", "B").Next();
+            graph.g().AddV("n").Property("name", "C").Next();
+            graph.g().AddV("n").Property("name", "D").Next();
+            graph.g().AddV("n").Property("name", "E").Next();
+            graph.g().AddV("n").Property("name", "F").Next();
+            graph.g().AddV("n").Property("name", "G").Next();
+
+            graph.g().V().Has("name", "A").AddE("knows").To(graph.g().V().Has("name", "B")).Next();
+            graph.g().V().Has("name", "B").AddE("knows").To(graph.g().V().Has("name", "C")).Next();
+            graph.g().V().Has("name", "D").AddE("knows").To(graph.g().V().Has("name", "C")).Next();
+            graph.g().V().Has("name", "C").AddE("knows").To(graph.g().V().Has("name", "E")).Next();
+            graph.g().V().Has("name", "E").AddE("knows").To(graph.g().V().Has("name", "F")).Next();
+            graph.g().V().Has("name", "G").AddE("knows").To(graph.g().V().Has("name", "F")).Next();
+
+            res = graph.g().V().Has("name", "A").
+               Repeat(GraphTraversal2.__().Out()).
+               Emit().As("x").Repeat(GraphTraversal2.__().In()).
+               Emit(GraphTraversal2.__().Has("name", "D")).
+               Select("x").Limit(1).Values("name").Next();
+            print("11*)", res);
+
+            // 12) Order "created" edges by their weights
+            res = graph.g().E().HasLabel("created").Order().By("weight").
+                Project("from","to","weight").By(GraphTraversal2.__().OutV().Values("name")).
+                By(GraphTraversal2.__().InV().Values("name")).
+                By(GraphTraversal2.__().Values("weight")).Next();       
+            print("12)", res);
+
+            // 13) Simple path
+            res = graph.g().V().HasLabel("person").Both().Both().SimplePath().Path().By("name").Next();
+            print("x", res);
 
             System.Console.WriteLine("Finished");
             System.Console.ReadKey();

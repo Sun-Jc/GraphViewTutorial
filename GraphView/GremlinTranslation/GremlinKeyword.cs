@@ -92,6 +92,10 @@ namespace GraphView
             public const string SimplePath = "SimplePath";
             public const string CyclicPath = "CyclicPath";
             public const string ValueMap = "ValueMap";
+            public const string PropertyMap = "PropertyMap";
+            public const string SampleGlobal = "SampleGlobal";
+            public const string SampleLocal = "SampleLocal";
+            public const string Barrier = "Barrier";
         }
 
         public enum Pop

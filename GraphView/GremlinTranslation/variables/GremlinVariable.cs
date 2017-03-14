@@ -198,6 +198,13 @@ namespace GraphView
             }
         }
 
+        internal virtual void Barrier(GremlinToSqlContext currentContext)
+        {
+            GremlinBarrierVariable newVariable = new GremlinBarrierVariable();
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+        }
+
         internal virtual void Both(GremlinToSqlContext currentContext, List<string> edgeLabels)
         {
             GremlinVariableProperty sourceProperty = GetVariableProperty(GremlinKeyword.NodeID);
@@ -743,9 +750,12 @@ namespace GraphView
             }
         }
 
-        internal virtual void PropertyMap(GremlinToSqlContext currentContext, params string[] propertyKeys)
+        internal virtual void PropertyMap(GremlinToSqlContext currentContext, List<string> propertyKeys)
         {
-            throw new NotImplementedException();
+            GremlinPropertyMapVariable newVariable = new GremlinPropertyMapVariable(this, propertyKeys);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
+            currentContext.SetPivotVariable(newVariable);
         }
 
         internal virtual void Range(GremlinToSqlContext currentContext, int low, int high, GremlinKeyword.Scope scope, bool isReverse)
@@ -771,14 +781,11 @@ namespace GraphView
         //internal virtual void Sack(BiFunction<V, U, V>) sackOperator) //Deprecated
         //internal virtual void Sack(BiFunction<V, U, V>) sackOperator, string, elementPropertyKey) //Deprecated
 
-        internal virtual void Sample(GremlinToSqlContext currentContext, int amountToSample)
+        internal virtual void Sample(GremlinToSqlContext currentContext, GremlinKeyword.Scope scope, int amountToSample, GremlinToSqlContext probabilityContext)
         {
-            throw new NotImplementedException();
-        }
-
-        internal virtual void Sample(GremlinToSqlContext currentContext, GremlinKeyword.Scope scope, int amountToSample)
-        {
-            throw new NotImplementedException();
+            GremlinSampleVariable newVariable = new GremlinSampleVariable(scope, amountToSample, probabilityContext);
+            currentContext.VariableList.Add(newVariable);
+            currentContext.TableReferences.Add(newVariable);
         }
 
         internal GremlinVariable GetTheFirstVariable(List<GremlinVariable> taggedVariableList)

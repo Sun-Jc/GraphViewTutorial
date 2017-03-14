@@ -111,7 +111,13 @@ namespace GraphView
             this.isTraversalToBound = true;
             base.Aggregate(currentContext, sideEffectKey, projectContext);
         }
-        
+
+        internal override void Barrier(GremlinToSqlContext currentContext)
+        {
+            this.isTraversalToBound = true;
+            base.Barrier(currentContext);
+        }
+
         internal override void Coin(GremlinToSqlContext currentContext, double probability)
         {
             this.isTraversalToBound = true;
@@ -160,6 +166,13 @@ namespace GraphView
         {
             this.isTraversalToBound = true;
             base.Range(currentContext, low, high, scope, isReverse);
+        }
+
+        internal override void Sample(GremlinToSqlContext currentContext, GremlinKeyword.Scope scope, int amountToSample,
+            GremlinToSqlContext probabilityContext)
+        {
+            this.isTraversalToBound = true;
+            base.Sample(currentContext, scope, amountToSample, probabilityContext);
         }
 
         internal override void SideEffect(GremlinToSqlContext currentContext, GremlinToSqlContext sideEffectContext)

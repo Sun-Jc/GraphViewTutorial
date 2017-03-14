@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -7,8 +8,144 @@ using Newtonsoft.Json.Linq;
 
 namespace GraphView
 {
+    partial class WAddVTableReference2
+    {
+        public JObject ConstructNodeJsonDocument(string vertexLabel, List<WPropertyExpression> vertexProperties, out List<string> projectedFieldList)
+        {
+            Debug.Assert(vertexLabel != null);
+            JObject vertexObject = new JObject {
+                ["label"] = vertexLabel
+            };
+
+            projectedFieldList = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
+
+            foreach (WPropertyExpression vertexProperty in vertexProperties) {
+                Debug.Assert(vertexProperty.Cardinality == GremlinKeyword.PropertyCardinality.list);
+
+                if (!projectedFieldList.Contains(vertexProperty.Key.Value))
+                    projectedFieldList.Add(vertexProperty.Key.Value);
+
+                if (vertexProperty.Value.ToJValue() == null) {
+                    continue;
+                }
+
+                JObject meta = new JObject();
+                foreach (KeyValuePair<WValueExpression, WValueExpression> pair in vertexProperty.MetaProperties) {
+                    WValueExpression metaName = pair.Key;
+                    WValueExpression metaValue = pair.Value;
+                    meta[metaName.Value] = metaValue.ToJValue();
+                }
+
+                string name = vertexProperty.Key.Value;
+                JArray propArray = (JArray)vertexObject[name];
+                if (propArray == null) {
+                    propArray = new JArray();
+                    vertexObject[name] = propArray;
+                }
+
+                propArray.Add(new JObject {
+                    ["_value"] = vertexProperty.Value.ToJValue(),
+                    ["_propId"] = GraphViewConnection.GenerateDocumentId(),
+                    ["_meta"] = meta,
+                });
+                //GraphViewJsonCommand.AppendVertexSinglePropertyToVertex(vertexObject);
+            }
+
+            vertexObject["_edge"] = new JArray();
+            vertexObject["_reverse_edge"] = new JArray();
+            vertexObject["_nextEdgeOffset"] = 0;
+
+            return vertexObject;
+        }
+
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            //
+            // Parameters:
+            //   #1 <WValueExpression>: Vertex label
+            //   ... <WPropertyExpression>: The initial properties on vertex
+            //
+
+            WValueExpression labelValue = (WValueExpression)this.Parameters[0];
+
+            List<WPropertyExpression> vertexProperties = new List<WPropertyExpression>();
+            for (int i = 1; i < this.Parameters.Count; i++) {
+                WPropertyExpression property = (WPropertyExpression)this.Parameters[i];
+                Debug.Assert(property != null, "[WAddVTableReference.Compile] Vertex property should not be null");
+                Debug.Assert(property.Cardinality == GremlinKeyword.PropertyCardinality.list, "[WAddVTableReference.Compile] Vertex property should be append-mode");
+                Debug.Assert(property.Value != null);
+
+                vertexProperties.Add(property);
+            }
+
+            List<string> projectedField;
+
+            JObject nodeJsonDocument = ConstructNodeJsonDocument(labelValue.Value, vertexProperties, out projectedField);
+
+            AddVOperator addVOp = new AddVOperator(
+                context.CurrentExecutionOperator,
+                dbConnection,
+                nodeJsonDocument,
+                projectedField);
+            context.CurrentExecutionOperator = addVOp;
+
+            context.AddField(Alias.Value, "id", ColumnGraphType.VertexId);
+            context.AddField(Alias.Value, "label", ColumnGraphType.Value);
+            context.AddField(Alias.Value, "_edge", ColumnGraphType.OutAdjacencyList);
+            context.AddField(Alias.Value, "_reverse_edge", ColumnGraphType.InAdjacencyList);
+            context.AddField(Alias.Value, "*", ColumnGraphType.VertexObject);
+            for (var i = GraphViewReservedProperties.ReservedNodeProperties.Count; i < projectedField.Count; i++) {
+                context.AddField(Alias.Value, projectedField[i], ColumnGraphType.Value);
+            }
+
+            return addVOp;
+        }
+    }
+
     partial class WAddVTableReference
     {
+        public JObject ConstructNodeJsonDocument(out List<string> projectedFieldList)
+        {
+            JObject nodeJsonDocument = new JObject();
+            projectedFieldList = new List<string>(GraphViewReservedProperties.ReservedNodeProperties);
+
+            for (var i = 0; i < Parameters.Count; i += 2) {
+                var key = (Parameters[i] as WValueExpression).Value;
+
+                //GraphViewJsonCommand.UpdateProperty(nodeJsonDocument, Parameters[i] as WValueExpression,
+                //    Parameters[i + 1] as WValueExpression);
+                GraphViewJsonCommand.UpdateProperty(nodeJsonDocument, Parameters[i] as WValueExpression,
+                    Parameters[i + 1] as WValueExpression);
+                string name = (Parameters[i] as WValueExpression).Value;
+                JToken value = (Parameters[i + 1] as WValueExpression).ToJValue();
+                if (value != null) {
+                    if (VertexField.IsVertexMetaProperty(name)) {
+                        nodeJsonDocument[name] = value;
+                    }
+                    else {
+                        nodeJsonDocument[name] = new JArray {
+                            new JObject {
+                                ["_value"] = value,
+                                ["_propId"] = GraphViewConnection.GenerateDocumentId(),
+                                ["_meta"] = new JObject(),
+                            },
+                        };
+                    }
+                }
+
+                if (!projectedFieldList.Contains(key))
+                    projectedFieldList.Add(key);
+            }
+
+            //nodeJsonDocument = GraphViewJsonCommand.insert_property(nodeJsonDocument, "[]", "_edge").ToString();
+            //nodeJsonDocument = GraphViewJsonCommand.insert_property(nodeJsonDocument, "[]", "_reverse_edge").ToString();
+            nodeJsonDocument["_edge"] = new JArray();
+            nodeJsonDocument["_reverse_edge"] = new JArray();
+            nodeJsonDocument["_nextEdgeOffset"] = 0;
+
+            return nodeJsonDocument;
+        }
+
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
         {
             List<string> projectedField;
@@ -67,6 +204,22 @@ namespace GraphView
         }
     }
 
+
+    partial class WDropTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            var dropTargetParameter = Parameters[0] as WColumnReferenceExpression;
+            var dropTargetIndex = context.LocateColumnReference(dropTargetParameter);
+
+            var dropOp = new DropOperator(context.CurrentExecutionOperator, dbConnection, dropTargetIndex);
+            context.CurrentExecutionOperator = dropOp;
+
+            return dropOp;
+        }
+    }
+
+
     partial class WDropNodeTableReference
     {
         internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
@@ -78,6 +231,21 @@ namespace GraphView
             context.CurrentExecutionOperator = dropNodeOp;
 
             return dropNodeOp;
+        }
+
+        internal GraphViewExecutionOperator Compile2(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression dropTargetParameter = Parameters[0] as WColumnReferenceExpression;
+            Debug.Assert(dropTargetParameter != null, "dropTargetParameter != null");
+            int dropTargetIndex = context.LocateColumnReference(dropTargetParameter);
+
+            //
+            // A new DropOperator which drops target based on its runtime type
+            //
+            DropNodeOperator dropOp = new DropNodeOperator(context.CurrentExecutionOperator, dbConnection, dropTargetIndex);
+            context.CurrentExecutionOperator = dropOp;
+
+            return dropOp;
         }
     }
 
@@ -97,34 +265,34 @@ namespace GraphView
         }
     }
 
-    partial class WUpdateNodePropertiesTableReference
-    {
-        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
-        {
-            var nodeIdParameter = Parameters[0] as WColumnReferenceExpression;
-            var nodeIdIndex = context.LocateColumnReference(nodeIdParameter);
-            var nodeAlias = nodeIdParameter.TableReference;
-            var propertiesList = new List<Tuple<WValueExpression, WValueExpression, int>>();
+    //partial class WUpdateVertexPropertiesTableReference
+    //{
+    //    internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+    //    {
+    //        var nodeIdParameter = Parameters[0] as WColumnReferenceExpression;
+    //        var nodeIdIndex = context.LocateColumnReference(nodeIdParameter);
+    //        var nodeAlias = nodeIdParameter.TableReference;
+    //        var propertiesList = new List<Tuple<WValueExpression, WValueExpression, int>>();
 
-            for (var i = 1; i < Parameters.Count; i += 2)
-            {
-                var keyExpression = Parameters[i] as WValueExpression;
-                var valueExpression = Parameters[i+1] as WValueExpression;
+    //        for (var i = 1; i < Parameters.Count; i += 2)
+    //        {
+    //            var keyExpression = Parameters[i] as WValueExpression;
+    //            var valueExpression = Parameters[i+1] as WValueExpression;
 
-                int propertyIndex;
-                if (!context.TryLocateColumnReference(new WColumnReferenceExpression(nodeAlias, keyExpression.Value), out propertyIndex))
-                    propertyIndex = -1;
+    //            int propertyIndex;
+    //            if (!context.TryLocateColumnReference(new WColumnReferenceExpression(nodeAlias, keyExpression.Value), out propertyIndex))
+    //                propertyIndex = -1;
 
-                propertiesList.Add(new Tuple<WValueExpression, WValueExpression, int>(keyExpression, valueExpression, propertyIndex));
-            }
+    //            propertiesList.Add(new Tuple<WValueExpression, WValueExpression, int>(keyExpression, valueExpression, propertyIndex));
+    //        }
 
-            var updateNodePropertiesOp = new UpdateNodePropertiesOperator(context.CurrentExecutionOperator, dbConnection,
-                nodeIdIndex, propertiesList);
-            context.CurrentExecutionOperator = updateNodePropertiesOp;
+    //        var updateNodePropertiesOp = new UpdateNodePropertiesOperator(context.CurrentExecutionOperator, dbConnection,
+    //            nodeIdIndex, propertiesList);
+    //        context.CurrentExecutionOperator = updateNodePropertiesOp;
 
-            return updateNodePropertiesOp;
-        }
-    }
+    //        return updateNodePropertiesOp;
+    //    }
+    //}
 
     partial class WUpdateEdgePropertiesTableReference
     {
@@ -156,6 +324,34 @@ namespace GraphView
             return updateEdgePropertiesOp;
         }
     }
+
+
+    partial class WUpdatePropertiesTableReference
+    {
+        internal override GraphViewExecutionOperator Compile(QueryCompilationContext context, GraphViewConnection dbConnection)
+        {
+            WColumnReferenceExpression updateParameter = this.Parameters[0] as WColumnReferenceExpression;
+            int updateIndex = context.LocateColumnReference(updateParameter);
+            var propertiesList = new List<WPropertyExpression>();
+
+            for (int i = 1; i < this.Parameters.Count; ++i) {
+                propertiesList.Add((WPropertyExpression)this.Parameters[i]);
+#if DEBUG
+                ((WPropertyExpression)this.Parameters[i]).Value.ToJValue();
+#endif
+            }
+
+            UpdatePropertiesOperator updateOp = new UpdatePropertiesOperator(
+                context.CurrentExecutionOperator, 
+                dbConnection,
+                updateIndex, 
+                propertiesList);
+            context.CurrentExecutionOperator = updateOp;
+
+            return updateOp;
+        }
+    }
+
 
     //partial class WInsertNodeSpecification
     //{

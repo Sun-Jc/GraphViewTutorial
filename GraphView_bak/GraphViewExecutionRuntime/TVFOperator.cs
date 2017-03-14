@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -93,9 +94,8 @@ namespace GraphView
             if (allPropertyIndex >= 0 && record[allPropertyIndex] != null) {
                 VertexField vertexField = record[allPropertyIndex] as VertexField;
                 if (vertexField != null) {
-                    foreach (var propertyPair in vertexField.VertexProperties) {
-                        string propertyName = propertyPair.Key;
-                        VertexPropertyField propertyField = propertyPair.Value;
+                    foreach (PropertyField property in vertexField.AllProperties) {
+                        string propertyName = property.PropertyName;
 
                         switch (propertyName) {
                         // Reversed properties for meta-data
@@ -112,7 +112,18 @@ namespace GraphView
                             continue;
                         default:
                             RawRecord r = new RawRecord();
-                            r.Append(propertyField);
+                            if (property is VertexSinglePropertyField || property is ValuePropertyField) {
+                                r.Append(property);
+                            }
+                            else if (property is VertexPropertyField) {
+                                foreach (VertexSinglePropertyField p in ((VertexPropertyField)property).Multiples.Values) {
+                                    r.Append(p);
+                                }
+                            }
+                            else {
+                                Debug.Assert(false, $"[PropertiesOperator.CrossApply] property type error: {property.GetType()}");
+                            }
+
                             results.Add(r);
                             break;
                         }
@@ -166,6 +177,352 @@ namespace GraphView
         } 
     }
 
+    internal class PropertiesOperator2 : TableValuedFunction
+    {
+        List<int> propertiesIndex;
+        List<string> populateMetaproperties; 
+
+        public PropertiesOperator2(
+            GraphViewExecutionOperator inputOp,
+            List<int> propertiesIndex,
+            List<string> populateMetaproperties) : base(inputOp)
+        {
+            this.propertiesIndex = propertiesIndex;
+            this.populateMetaproperties = populateMetaproperties;
+        }
+
+        internal override List<RawRecord> CrossApply(RawRecord record)
+        {
+            List<RawRecord> results = new List<RawRecord>();
+
+            foreach (int propertyIndex in this.propertiesIndex)
+            {
+                FieldObject propertyObject = record[propertyIndex];
+                if (propertyObject == null) {
+                    continue;
+                }
+
+                VertexPropertyField vp = propertyObject as VertexPropertyField;
+                if (vp != null)
+                {
+                    foreach (VertexSinglePropertyField vsp in vp.Multiples.Values)
+                    {
+                        RawRecord r = new RawRecord();
+                        r.Append(new VertexSinglePropertyField(vsp));
+                        foreach (string metapropertyName in this.populateMetaproperties) {
+                            r.Append(vsp[metapropertyName]);
+                        }
+
+                        results.Add(r);
+                    }
+                    continue;
+                }
+
+                VertexSinglePropertyField singleVp = propertyObject as VertexSinglePropertyField;
+                if (singleVp != null)
+                {
+                    RawRecord r = new RawRecord();
+                    r.Append(new VertexSinglePropertyField(singleVp));
+                    foreach (string metapropertyName in this.populateMetaproperties) {
+                        r.Append(singleVp[metapropertyName]);
+                    }
+                    results.Add(r);
+                    continue;
+                }
+
+                EdgePropertyField edgePf = propertyObject as EdgePropertyField;
+                if (edgePf != null)
+                {
+                    if (this.populateMetaproperties.Count > 0) {
+                        throw new GraphViewException("An edge property cannot contain meta properties.");
+                    }
+
+                    RawRecord r = new RawRecord();
+                    r.Append(new EdgePropertyField(edgePf));
+                    results.Add(r);
+                    continue;
+                }
+
+                ValuePropertyField metaPf = propertyObject as ValuePropertyField;
+                if (metaPf != null)
+                {
+                    if (this.populateMetaproperties.Count > 0) {
+                        throw new GraphViewException("A meta property cannot contain meta properties.");
+                    }
+
+                    RawRecord r = new RawRecord();
+                    r.Append(new ValuePropertyField(metaPf));
+                    results.Add(r);
+                    continue;
+                }
+
+                Debug.Assert(false, "Should not get here.");
+            }
+
+            return results;
+        }
+    }
+
+    internal class ValuesOperator2 : TableValuedFunction
+    {
+        List<int> propertiesIndex;
+
+        public ValuesOperator2(GraphViewExecutionOperator inputOp, List<int> propertiesIndex) : base(inputOp)
+        {
+            this.propertiesIndex = propertiesIndex;
+        }
+
+        internal override List<RawRecord> CrossApply(RawRecord record)
+        {
+            List<RawRecord> results = new List<RawRecord>();
+
+            foreach (int propertyIndex in this.propertiesIndex)
+            {
+                FieldObject propertyObject = record[propertyIndex];
+                if (propertyObject == null) {
+                    continue;
+                }
+
+                VertexPropertyField vp = propertyObject as VertexPropertyField;
+                if (vp != null)
+                {
+                    foreach (VertexSinglePropertyField vsp in vp.Multiples.Values)
+                    {
+                        RawRecord r = new RawRecord();
+                        r.Append(new StringField(vsp.PropertyValue, vsp.JsonDataType));
+                        results.Add(r);
+                    }
+                    continue;
+                }
+
+                VertexSinglePropertyField singleVp = propertyObject as VertexSinglePropertyField;
+                if (singleVp != null)
+                {
+                    RawRecord r = new RawRecord();
+                    r.Append(new StringField(singleVp.PropertyValue, singleVp.JsonDataType));
+                    results.Add(r);
+                    continue;
+                }
+
+                EdgePropertyField edgePf = propertyObject as EdgePropertyField;
+                if (edgePf != null)
+                {
+                    RawRecord r = new RawRecord();
+                    r.Append(new StringField(edgePf.PropertyValue, edgePf.JsonDataType));
+                    results.Add(r);
+                    continue;
+                }
+
+                ValuePropertyField metaPf = propertyObject as ValuePropertyField;
+                if (metaPf != null)
+                {
+                    RawRecord r = new RawRecord();
+                    r.Append(new StringField(metaPf.PropertyValue, metaPf.JsonDataType));
+                    results.Add(r);
+                    continue;
+                }
+
+                Debug.Assert(false, "Should not get here.");
+            }
+
+            return results;
+        }
+    }
+
+    internal class AllPropertiesOperator : TableValuedFunction
+    {
+        private readonly int inputTargetIndex;
+        private readonly List<string> populateMetaProperties;
+
+        internal AllPropertiesOperator(
+            GraphViewExecutionOperator inputOp,
+            int inputTargetIndex,
+            List<string> populateMetaProperties) : base(inputOp)
+        {
+            this.inputTargetIndex = inputTargetIndex;
+            this.populateMetaProperties = populateMetaProperties;
+        }
+
+        internal override List<RawRecord> CrossApply(RawRecord record)
+        {
+            List<RawRecord> results = new List<RawRecord>();
+
+            FieldObject inputTarget = record[this.inputTargetIndex];
+
+            if (inputTarget is VertexField)
+            {
+                VertexField vertexField = (VertexField)inputTarget;
+                foreach (VertexPropertyField property in vertexField.VertexProperties.Values)
+                {
+                    string propertyName = property.PropertyName;
+                    Debug.Assert(!VertexField.IsVertexMetaProperty(propertyName));
+                    Debug.Assert(propertyName != "_edge");
+                    Debug.Assert(propertyName != "_reverse_edge");
+
+                    switch (propertyName)
+                    {
+                        case "_rid":
+                        case "_self":
+                        case "_etag":
+                        case "_attachments":
+                        case "_ts":
+                            continue;
+                        default:
+                            foreach (VertexSinglePropertyField singleVp in property.Multiples.Values)
+                            {
+                                RawRecord r = new RawRecord();
+                                r.Append(new VertexSinglePropertyField(singleVp));
+                                foreach (string metaPropertyName in this.populateMetaProperties) {
+                                    r.Append(singleVp[metaPropertyName]);
+                                }
+                                results.Add(r);
+                            }
+                            break;
+                    }
+                }
+            }
+            else if (inputTarget is EdgeField)
+            {
+                EdgeField edgeField = (EdgeField)inputTarget;
+                foreach (KeyValuePair<string, EdgePropertyField> propertyPair in edgeField.EdgeProperties)
+                {
+                    string propertyName = propertyPair.Key;
+                    EdgePropertyField edgePropertyField = propertyPair.Value;
+
+                    switch (propertyName)
+                    {
+                        // Reserved properties for meta-data
+                        case "label":
+                        case "_edgeId":
+                        case "_offset":
+                        case "_srcV":
+                        case "_sinkV":
+                        case "_srcVLabel":
+                        case "_sinkVLabel":
+                            continue;
+                        default:
+                            RawRecord r = new RawRecord();
+                            r.Append(new EdgePropertyField(edgePropertyField));
+                            results.Add(r);
+                            break;
+                    }
+                }
+
+                if (this.populateMetaProperties.Count > 0 && results.Count > 0) {
+                    throw new GraphViewException("An edge property cannot contain meta properties.");
+                }
+            }
+            else if (inputTarget is VertexSinglePropertyField)
+            {
+                VertexSinglePropertyField singleVp = (VertexSinglePropertyField)inputTarget;
+                foreach (KeyValuePair<string, ValuePropertyField> kvp in singleVp.MetaProperties)
+                {
+                    RawRecord r = new RawRecord();
+                    ValuePropertyField metaPropertyField = kvp.Value;
+                    r.Append(new ValuePropertyField(metaPropertyField));
+                    results.Add(r);
+                }
+
+                if (this.populateMetaProperties.Count > 0 && results.Count > 0) {
+                    throw new GraphViewException("An edge property cannot contain meta properties.");
+                }
+            }
+            else {
+                throw new GraphViewException("The input of properties() cannot be a meta or edge property.");
+            }
+            return results;
+        }
+    }
+
+    internal class AllValuesOperator : TableValuedFunction
+    {
+        private readonly int inputTargetIndex;
+
+        internal AllValuesOperator(GraphViewExecutionOperator inputOp, int inputTargetIndex) : base(inputOp)
+        {
+            this.inputTargetIndex = inputTargetIndex;
+        }
+
+        internal override List<RawRecord> CrossApply(RawRecord record)
+        {
+            List<RawRecord> results = new List<RawRecord>();
+
+            FieldObject inputTarget = record[this.inputTargetIndex];
+
+            if (inputTarget is VertexField)
+            {
+                VertexField vertexField = (VertexField)inputTarget;
+                foreach (VertexPropertyField property in vertexField.VertexProperties.Values)
+                {
+                    string propertyName = property.PropertyName;
+                    Debug.Assert(!VertexField.IsVertexMetaProperty(propertyName));
+                    Debug.Assert(propertyName == "_edge");
+                    Debug.Assert(propertyName == "_reverse_edge");
+
+                    switch (propertyName)
+                    {
+                        case "_rid":
+                        case "_self":
+                        case "_etag":
+                        case "_attachments":
+                        case "_ts":
+                            continue;
+                        default:
+                            foreach (VertexSinglePropertyField singleVp in property.Multiples.Values)
+                            {
+                                RawRecord r = new RawRecord();
+                                r.Append(new StringField(singleVp.PropertyValue, singleVp.JsonDataType));
+                                results.Add(r);
+                            }
+                            break;
+                    }
+                }
+            }
+            else if (inputTarget is EdgeField)
+            {
+                EdgeField edgeField = (EdgeField)inputTarget;
+
+                foreach (KeyValuePair<string, EdgePropertyField> propertyPair in edgeField.EdgeProperties)
+                {
+                    string propertyName = propertyPair.Key;
+                    EdgePropertyField edgePropertyField = propertyPair.Value;
+
+                    switch (propertyName)
+                    {
+                        // Reserved properties for meta-data
+                        case "_edgeId":
+                        case "_offset":
+                        case "_srcV":
+                        case "_sinkV":
+                        case "_srcVLabel":
+                        case "_sinkVLabel":
+                            continue;
+                        default:
+                            RawRecord r = new RawRecord();
+                            r.Append(new StringField(edgePropertyField.PropertyValue, edgePropertyField.JsonDataType));
+                            results.Add(r);
+                            break;
+                    }
+                }
+            }
+            else if (inputTarget is VertexSinglePropertyField)
+            {
+                VertexSinglePropertyField singleVp = inputTarget as VertexSinglePropertyField;
+                foreach (KeyValuePair<string, ValuePropertyField> kvp in singleVp.MetaProperties)
+                {
+                    RawRecord r = new RawRecord();
+                    ValuePropertyField metaPropertyField = kvp.Value;
+                    r.Append(new StringField(metaPropertyField.PropertyValue, metaPropertyField.JsonDataType));
+                    results.Add(r);
+                }
+            }
+            else {
+                throw new GraphViewException("The input of values() cannot be a meta or edge property.");
+            }
+            return results;
+        }
+    }
+
     internal class ValuesOperator : TableValuedFunction
     {
         internal List<int> ValuesIdxList;
@@ -187,15 +544,14 @@ namespace GraphView
             {
                 VertexField vertexField = record[allValuesIndex] as VertexField;
                 if (vertexField != null) {
-                    foreach (var propertyPair in vertexField.VertexProperties) {
-                        string propertyName = propertyPair.Key;
-                        VertexPropertyField propertyField = propertyPair.Value;
+                    foreach (PropertyField property in vertexField.AllProperties) {
+                        string propertyName = property.PropertyName;
 
                         switch (propertyName) {
                         // Reversed properties for meta-data
                         case "_edge":
-                        case "_partition":
                         case "_reverse_edge":
+                        case "_partition":
                         case "_nextEdgeOffset":
 
                         case "_rid":
@@ -206,7 +562,7 @@ namespace GraphView
                             continue;
                         default:
                             RawRecord r = new RawRecord();
-                            r.Append(new StringField(propertyField.ToValue, propertyField.JsonDataType));
+                            r.Append(new StringField(property.PropertyValue, property.JsonDataType));
                             results.Add(r);
                             break;
                         }
@@ -262,31 +618,40 @@ namespace GraphView
 
     internal class ConstantOperator : TableValuedFunction
     {
-        private List<string> _constantValues;
+        private List<ScalarFunction> constantValues;
+        private bool isList;
 
-        internal ConstantOperator(GraphViewExecutionOperator pInputOperator, List<string> pConstantValues)
-            : base(pInputOperator)
+        internal ConstantOperator(
+            GraphViewExecutionOperator inputOp,
+            List<ScalarFunction> constantValues,
+            bool isList)
+            : base(inputOp)
         {
-            _constantValues = pConstantValues;
+            this.constantValues = constantValues;
+            this.isList = isList;
         }
 
         internal override List<RawRecord> CrossApply(RawRecord record)
         {
-            var result = new RawRecord(1);
-            if (_constantValues.Count == 1)
-                result.fieldValues[0] = new StringField(_constantValues[0]);
-            else
-            {
-                List<FieldObject> cf = new List<FieldObject>();
-                foreach (var value in _constantValues)
-                {
-                    cf.Add(new StringField(value));
-                }
-                
-                result.fieldValues[0] = new CollectionField(cf);
+            RawRecord result = new RawRecord();
+
+            if (this.constantValues.Count == 0 && !this.isList) {
+                return new List<RawRecord>();
             }
 
-            return new List<RawRecord> {result};
+            if (isList)
+            {
+                List<FieldObject> collection = new List<FieldObject>();
+                foreach (ScalarFunction constantValueFunc in this.constantValues) {
+                    collection.Add(constantValueFunc.Evaluate(null));
+                }
+                result.Append(new CollectionField(collection));
+            }
+            else {
+                result.Append(this.constantValues[0].Evaluate(null));
+            }
+
+            return new List<RawRecord> { result };
         }
     }
 
@@ -333,68 +698,180 @@ namespace GraphView
         }
     }
 
+    internal class PathOperator2 : GraphViewExecutionOperator
+    {
+        private GraphViewExecutionOperator inputOp;
+        //
+        // If the boolean value is true, then it's a subPath to be unfolded
+        //
+        private List<Tuple<ScalarFunction, bool>> pathStepList;
+        private List<ScalarFunction> byFuncList;
+
+        public PathOperator2(GraphViewExecutionOperator inputOp,
+            List<Tuple<ScalarFunction, bool>> pathStepList,
+            List<ScalarFunction> byFuncList)
+        {
+            this.inputOp = inputOp;
+            this.pathStepList = pathStepList;
+            this.byFuncList = byFuncList;
+
+            this.Open();
+        }
+
+        private FieldObject GetStepProjectionResult(FieldObject step, ref int activeByFuncIndex)
+        {
+            FieldObject stepProjectionResult;
+
+            if (this.byFuncList.Count == 0) {
+                stepProjectionResult = step;
+            }
+            else
+            {
+                RawRecord initCompose1Record = new RawRecord();
+                initCompose1Record.Append(step);
+                stepProjectionResult = this.byFuncList[activeByFuncIndex++ % this.byFuncList.Count].Evaluate(initCompose1Record);
+
+                if (stepProjectionResult == null) {
+                    throw new GraphViewException("The provided traversal or property name of path() does not map to a value.");
+                }
+            }
+
+            return stepProjectionResult;
+        }
+
+        public override RawRecord Next()
+        {
+            RawRecord inputRec;
+            while (this.inputOp.State() && (inputRec = this.inputOp.Next()) != null)
+            {
+                List<FieldObject> path = new List<FieldObject>();
+                int activeByFuncIndex = 0;
+
+                foreach (Tuple<ScalarFunction, bool> tuple in pathStepList)
+                {
+                    ScalarFunction accessPathStepFunc = tuple.Item1;
+                    bool needsUnfold = tuple.Item2;
+
+                    FieldObject step = accessPathStepFunc.Evaluate(inputRec);
+                    if (step == null) continue;
+
+                    if (needsUnfold)
+                    {
+                        CollectionField subPath = step as CollectionField;
+                        Debug.Assert(subPath != null, "(subPath as CollectionField) != null");
+
+                        foreach (FieldObject subPathStep in subPath.Collection) {
+                            path.Add(GetStepProjectionResult(subPathStep, ref activeByFuncIndex));
+                        }
+                    }
+                    else {
+                        path.Add(GetStepProjectionResult(step, ref activeByFuncIndex));
+                    }
+                }
+
+                RawRecord r = new RawRecord(inputRec);
+                r.Append(new CollectionField(path));
+                return r;
+            }
+
+            Close();
+            return null;
+        }
+
+        public override void ResetState()
+        {
+            this.inputOp.ResetState();
+            this.Open();
+        }
+    }
+
     internal class UnfoldOperator : TableValuedFunction
     {
-        private ScalarFunction _unfoldTarget;
-        private List<string> _unfoldColumns; 
+        private ScalarFunction getUnfoldTargetFunc;
+        private List<string> unfoldCompose1Columns; 
 
         internal UnfoldOperator(
-            GraphViewExecutionOperator pInputOperator,
-            ScalarFunction pUnfoldTarget,
-            List<string> pUnfoldColumns)
-            : base(pInputOperator)
+            GraphViewExecutionOperator inputOp,
+            ScalarFunction getUnfoldTargetFunc,
+            List<string> unfoldCompose1Columns)
+            : base(inputOp)
         {
-            this._unfoldTarget = pUnfoldTarget;
-            this._unfoldColumns = pUnfoldColumns;
+            this.getUnfoldTargetFunc = getUnfoldTargetFunc;
+            this.unfoldCompose1Columns = unfoldCompose1Columns;
         }
 
         internal override List<RawRecord> CrossApply(RawRecord record)
         {
             List<RawRecord> results = new List<RawRecord>();
 
-            FieldObject unfoldTarget = _unfoldTarget.Evaluate(record);
+            FieldObject unfoldTarget = getUnfoldTargetFunc.Evaluate(record);
 
-            if (unfoldTarget.GetType() == typeof (CollectionField))
+            if (unfoldTarget is CollectionField)
             {
                 CollectionField cf = unfoldTarget as CollectionField;
-                foreach (FieldObject fo in cf.Collection)
+                foreach (FieldObject singleObj in cf.Collection)
                 {
-                    if (fo == null) continue;
+                    if (singleObj == null) continue;
                     RawRecord newRecord = new RawRecord();
 
                     // Extract only needed columns from Compose1Field
-                    if (fo.GetType() == typeof (Compose1Field))
+                    if (singleObj is Compose1Field)
                     {
-                        Compose1Field compose1Field = fo as Compose1Field;
-                        foreach (string unfoldColumn in _unfoldColumns)
-                        {
-                            newRecord.Append(compose1Field.Map[new StringField(unfoldColumn)]);
+                        Compose1Field compose1Field = singleObj as Compose1Field;
+                        foreach (string unfoldColumn in unfoldCompose1Columns) {
+                            newRecord.Append(compose1Field.CompositeFieldObject[unfoldColumn]);
                         }
                     }
                     else
                     {
-                        newRecord.Append(fo);
+                        foreach (string columnName in this.unfoldCompose1Columns)
+                        {
+                            if (columnName.Equals(GremlinKeyword.TableDefaultColumnName)) {
+                                newRecord.Append(singleObj);
+                            }
+                            else {
+                                newRecord.Append((FieldObject)null);
+                            }     
+                        } 
                     }
+
                     results.Add(newRecord);
                 }
             }
-            else if (unfoldTarget.GetType() == typeof(MapField))
+            else if (unfoldTarget is MapField)
             {
                 MapField mf = unfoldTarget as MapField;
-                foreach (var pair in mf.Map)
+                foreach (KeyValuePair<FieldObject, FieldObject> pair in mf)
                 {
                     RawRecord newRecord = new RawRecord();
                     string key = pair.Key.ToString();
                     string value = pair.Value.ToString();
 
-                    newRecord.Append(new StringField(key + "=" + value));
+                    foreach (string columnName in this.unfoldCompose1Columns)
+                    {
+                        if (columnName.Equals(GremlinKeyword.TableDefaultColumnName)) {
+                            newRecord.Append(new StringField(key + "=" + value));
+                        }
+                        else {
+                            newRecord.Append((FieldObject)null);
+                        }
+                    }
+
                     results.Add(newRecord);
                 }
             }
             else
             {
                 RawRecord newRecord = new RawRecord();
-                newRecord.Append(unfoldTarget);
+                foreach (string columnName in this.unfoldCompose1Columns)
+                {
+                    if (columnName.Equals(GremlinKeyword.TableDefaultColumnName)) {
+                        newRecord.Append(unfoldTarget);
+                    }
+                    else {
+                        newRecord.Append((FieldObject)null);
+                    }
+                }
                 results.Add(newRecord);
             }
 
